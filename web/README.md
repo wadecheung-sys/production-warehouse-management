@@ -37,6 +37,9 @@ npm run dev
 
 浏览器访问 http://localhost:5173
 
+**公网演示：** https://wadecheung-sys.github.io/production-warehouse-management/  
+（推送 `main` 分支后由 GitHub Actions 自动部署，首次需在仓库 Settings → Pages 中选择 **GitHub Actions** 作为来源）
+
 **演示账号：** `admin` / `123456`（演示阶段管理员看全量数据）
 
 ## 版本说明

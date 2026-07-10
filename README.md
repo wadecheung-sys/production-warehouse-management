@@ -15,3 +15,5 @@ npm run dev
 当前版本：**v1.0** — 完整前端演示（Mock 持久化 + 业务闭环 + 导出/打印 + API 层就绪）
 
 详细说明见 [web/README.md](./web/README.md)
+
+**公网演示：** https://wadecheung-sys.github.io/production-warehouse-management/
