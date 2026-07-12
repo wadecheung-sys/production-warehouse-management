@@ -13,3 +13,6 @@ Thumbs.db
 
 # Reference materials (local only, not for version control)
 reference/
+
+# Local workspace — plans, progress, session notes (not for version control)
+workspace/

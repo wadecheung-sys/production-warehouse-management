@@ -6,7 +6,7 @@ const ledgerColumns: ExportColumn[] = [
   { key: 'name', label: '设备名称' },
   { key: 'typeName', label: '设备类型' },
   { key: 'orgName', label: '所属组织' },
-  { key: 'warehouseName', label: '库位' },
+  { key: 'warehouseName', label: '生产仓地点' },
   { key: 'quantity', label: '数量' },
   { key: 'unit', label: '单位' },
   { key: 'status', label: '状态' },

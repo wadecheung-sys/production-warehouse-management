@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { menuRoutes } from '@/router/menu'
-import { useDataStore } from '@/stores/data'
+import { canAccessMenuPath, canAccessSystemChild } from '@/utils/permission'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
-const dataStore = useDataStore()
 
 const activeMenu = computed(() => route.path)
 
@@ -37,11 +36,22 @@ interface MenuRoute {
 
 const menus = menuRoutes as MenuRoute[]
 
-async function handleResetData() {
-  await ElMessageBox.confirm('将恢复全部业务数据为初始状态，是否继续？', '恢复初始数据', { type: 'warning' })
-  dataStore.resetAllData()
-  ElMessage.success('数据已恢复')
-}
+const visibleMenus = computed(() =>
+  menus
+    .filter((item) => canAccessMenuPath(item.path, userStore.context))
+    .map((item) => {
+      if (!item.children?.length) return item
+      const children = item.children.filter((child) => {
+        if (item.path === '/system') {
+          return canAccessSystemChild(child.path, userStore.context)
+        }
+        return true
+      })
+      if (!children.length) return null
+      return { ...item, children }
+    })
+    .filter((item): item is MenuRoute => item !== null),
+)
 
 function resolvePath(base: string, childPath: string) {
   if (childPath.startsWith('/')) return childPath
@@ -54,7 +64,7 @@ function resolvePath(base: string, childPath: string) {
     <el-aside :width="appStore.sidebarCollapsed ? '64px' : '220px'" class="sidebar">
       <div class="logo">
         <el-icon :size="24"><Box /></el-icon>
-        <span v-show="!appStore.sidebarCollapsed">生产仓管理系统</span>
+        <span v-show="!appStore.sidebarCollapsed">智慧化生产专业仓</span>
       </div>
       <el-scrollbar>
         <el-menu
@@ -66,7 +76,7 @@ function resolvePath(base: string, childPath: string) {
           router
           :collapse-transition="false"
         >
-          <template v-for="item in menus" :key="item.path">
+          <template v-for="item in visibleMenus" :key="item.path">
             <el-sub-menu v-if="item.children?.length" :index="item.path">
               <template #title>
                 <el-icon v-if="item.meta?.icon"><component :is="item.meta.icon" /></el-icon>
@@ -103,12 +113,14 @@ function resolvePath(base: string, childPath: string) {
           <el-dropdown>
             <span class="user-info">
               <el-avatar :size="28">{{ userStore.displayName.slice(0, 1) }}</el-avatar>
-              <span>{{ userStore.displayName }}</span>
+              <span class="user-meta">
+                <span class="user-name">{{ userStore.displayName }}</span>
+                <span v-if="userStore.orgLabel" class="user-org">{{ userStore.orgLabel }}</span>
+              </span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item @click="handleResetData">恢复初始数据</el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+                <el-dropdown-item @click="handleLogout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -118,7 +130,7 @@ function resolvePath(base: string, childPath: string) {
         <router-view />
       </el-main>
       <el-footer class="footer" height="auto">
-        Copyright © 2026-present 生产仓管理系统
+        Copyright © 2026-present 智慧化生产专业仓管理系统
       </el-footer>
     </el-container>
   </el-container>
@@ -188,6 +200,21 @@ function resolvePath(base: string, childPath: string) {
     gap: 8px;
     cursor: pointer;
     font-size: 14px;
+  }
+
+  .user-meta {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+  }
+
+  .user-name {
+    font-size: 14px;
+  }
+
+  .user-org {
+    font-size: 11px;
+    color: #8c8c8c;
   }
 }
 

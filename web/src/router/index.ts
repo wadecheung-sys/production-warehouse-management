@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { canAccessMenuPath } from '@/utils/permission'
 import { menuRoutes } from './menu'
 
 const router = createRouter({
@@ -30,6 +31,9 @@ router.beforeEach((to) => {
     return '/login'
   }
   if (to.path === '/login' && userStore.isLoggedIn()) {
+    return '/dashboard'
+  }
+  if (to.path !== '/login' && !canAccessMenuPath(to.path, userStore.context)) {
     return '/dashboard'
   }
 })

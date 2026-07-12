@@ -5,11 +5,15 @@ import FilterBar from '@/components/FilterBar.vue'
 import PageToolbar from '@/components/PageToolbar.vue'
 import type { FilterField } from '@/components/FilterBar.vue'
 import { useTableFilter } from '@/composables/useTableFilter'
+import { useDataScope } from '@/composables/useDataScope'
 import { useDataStore } from '@/stores/data'
 import { matchExact, matchKeyword } from '@/utils/filter'
+import { formatOrgOptionLabel } from '@/utils/org'
 import type { Person } from '@/types'
 
 const dataStore = useDataStore()
+const { scopePersons, visibleOrganizations, can } = useDataScope()
+const canManagePersonnel = computed(() => can('system:user'))
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
@@ -35,7 +39,7 @@ const filterFields = computed<FilterField[]>(() => [
     key: 'orgId',
     type: 'select',
     placeholder: '组织机构',
-    options: [{ label: '全部组织', value: '' }, ...dataStore.organizations.map((o) => ({ label: o.name, value: o.id }))],
+    options: [{ label: '全部组织', value: '' }, ...visibleOrganizations.value.map((o) => ({ label: formatOrgOptionLabel(o), value: o.id }))],
     width: '150px',
   },
   {
@@ -54,7 +58,7 @@ const filterFields = computed<FilterField[]>(() => [
   },
 ])
 
-const tableData = computed(() => filterListWithCount(dataStore.persons))
+const tableData = computed(() => filterListWithCount(scopePersons(dataStore.persons)))
 
 const exportColumns = [
   { key: 'employeeNo', label: '工号' },
@@ -64,7 +68,7 @@ const exportColumns = [
   { key: 'phone', label: '联系电话' },
   { key: 'status', label: '状态' },
 ]
-const exportData = computed(() => tableData.value as Record<string, unknown>[])
+const exportData = computed(() => tableData.value as unknown as Record<string, unknown>[])
 
 const form = reactive({
   name: '',
@@ -119,7 +123,7 @@ async function handleDelete(row: Person) {
       <div class="panel-actions">
         <PageToolbar title="人员管理" filename="人员管理" :columns="exportColumns" :data="exportData" />
         <div class="panel-actions__right">
-          <el-button type="primary" @click="openDialog()"><el-icon><Plus /></el-icon> 新增人员</el-button>
+          <el-button v-if="canManagePersonnel" type="primary" @click="openDialog()"><el-icon><Plus /></el-icon> 新增人员</el-button>
         </div>
       </div>
 
@@ -138,8 +142,11 @@ async function handleDelete(row: Person) {
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <template v-if="canManagePersonnel">
+              <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            </template>
+            <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
       </el-table>
@@ -151,7 +158,7 @@ async function handleDelete(row: Person) {
         <el-form-item label="工号" prop="employeeNo"><el-input v-model="form.employeeNo" /></el-form-item>
         <el-form-item label="组织机构" prop="orgId">
           <el-select v-model="form.orgId" style="width: 100%">
-            <el-option v-for="org in dataStore.organizations" :key="org.id" :label="org.name" :value="org.id" />
+            <el-option v-for="org in visibleOrganizations" :key="org.id" :label="formatOrgOptionLabel(org)" :value="org.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="角色" prop="roleId">

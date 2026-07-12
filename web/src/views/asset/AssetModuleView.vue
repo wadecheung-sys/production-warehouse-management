@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import FilterBar from '@/components/FilterBar.vue'
 import PageToolbar from '@/components/PageToolbar.vue'
@@ -12,6 +12,7 @@ import { useDataStore } from '@/stores/data'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { usePagination } from '@/composables/usePagination'
+import { useDataScope } from '@/composables/useDataScope'
 import { getExportColumns, getExportFilename } from '@/views/asset/assetExportColumns'
 import {
   applyAssetFilter,
@@ -19,11 +20,22 @@ import {
   getFilterDefaults,
 } from '@/views/asset/assetFilters'
 import { todayStr } from '@/utils/id'
+import { isInventoryCenterOrg, getOrgDescendantIds } from '@/utils/org'
 
 const route = useRoute()
+const router = useRouter()
 const dataStore = useDataStore()
 const userStore = useUserStore()
 const appStore = useAppStore()
+const {
+  scopeLedgersByCategories,
+  scopeByAssets,
+  scopeByOrg,
+  scopeWarehouses,
+  visibleOrganizations,
+  can,
+  canEditLedger,
+} = useDataScope()
 
 const dialogVisible = ref(false)
 const dispatchVisible = ref(false)
@@ -38,9 +50,20 @@ const formRef = ref<FormInstance>()
 const dispatchFormRef = ref<FormInstance>()
 const convertFormRef = ref<FormInstance>()
 
-const category = computed(() => route.meta.category as AssetCategory)
+const category = computed(() => route.meta.category as AssetCategory | undefined)
+const aggregateAssets = computed(() => route.meta.aggregateAssets === true)
 const subModule = computed(() => route.meta.subModule as SubModule)
-const pageTitle = computed(() => `${categoryLabels[category.value]} · ${subModuleLabels[subModule.value]}`)
+const pageTitle = computed(() => {
+  if (aggregateAssets.value) {
+    return `生产仓管理 · ${subModuleLabels[subModule.value]}`
+  }
+  return `${categoryLabels[category.value!]} · ${subModuleLabels[subModule.value]}`
+})
+
+const assetCategories = computed((): AssetCategory[] => {
+  if (aggregateAssets.value) return ['spare', 'instrument', 'tool']
+  return category.value ? [category.value] : []
+})
 
 const draft = ref<Record<string, unknown>>({})
 const applied = ref<Record<string, unknown>>({})
@@ -50,9 +73,14 @@ function initFilters() {
   const defaults = getFilterDefaults(subModule.value)
   draft.value = { ...defaults }
   applied.value = { ...defaults }
+  if (subModule.value === 'ledger' && route.query.warehouseId) {
+    draft.value.warehouseId = route.query.warehouseId as string
+    applied.value.warehouseId = route.query.warehouseId as string
+  }
 }
 
 watch([category, subModule], initFilters, { immediate: true })
+watch(() => route.query.warehouseId, initFilters)
 
 function search() {
   applied.value = { ...draft.value }
@@ -63,24 +91,59 @@ function resetFilters() {
 }
 
 const categoryData = computed(() => {
+  const cats = assetCategories.value
+  const scopedLedgers = scopeLedgersByCategories(dataStore.ledgers, cats)
   switch (subModule.value) {
     case 'ledger':
-      return dataStore.ledgers.filter((i) => i.category === category.value)
+      return scopedLedgers
     case 'inout':
-      return dataStore.inOutRecords.filter((i) => i.category === category.value)
+      return scopeByAssets(
+        dataStore.inOutRecords.filter((i) => cats.includes(i.category)),
+        scopedLedgers,
+      )
     case 'fault':
-      return dataStore.faultRecords.filter((i) => i.category === category.value)
+      return scopeByAssets(
+        dataStore.faultRecords.filter((i) => cats.includes(i.category)),
+        scopedLedgers,
+      )
     case 'maintenance':
-      return dataStore.maintenanceRecords.filter((i) => i.category === category.value)
+      return scopeByAssets(
+        dataStore.maintenanceRecords.filter((i) => cats.includes(i.category)),
+        scopedLedgers,
+      )
     case 'inventory':
-      return dataStore.inventoryTasks.filter((i) => i.category === category.value)
+      return scopeByOrg(dataStore.inventoryTasks.filter((i) => cats.includes(i.category)))
     default:
       return []
   }
 })
 
+const canEditCurrent = computed(() => {
+  switch (subModule.value) {
+    case 'ledger':
+      return canEditLedger()
+    case 'inout':
+      return can('inout:edit')
+    case 'fault':
+      return can('fault:edit')
+    case 'maintenance':
+      return can('maintenance:edit')
+    case 'inventory':
+      return can('inventory:execute')
+    default:
+      return false
+  }
+})
+
+const canDispatchInventory = computed(() => can('inventory:dispatch'))
+
 const filterFields = computed(() =>
-  buildFilterFields(subModule.value, categoryData.value, dataStore.organizations),
+  buildFilterFields(
+    subModule.value,
+    categoryData.value,
+    visibleOrganizations.value,
+    scopeWarehouses(dataStore.warehouseSites),
+  ),
 )
 
 const tableData = computed(() => {
@@ -94,13 +157,32 @@ const tableData = computed(() => {
 const { currentPage, pageSize, total: pageTotal, pageData } = usePagination(tableData, 10)
 
 const exportColumns = computed(() => getExportColumns(subModule.value))
-const exportFilename = computed(() => getExportFilename(categoryLabels[category.value], subModuleLabels[subModule.value]))
+const exportFilename = computed(() => {
+  const catLabel = aggregateAssets.value ? '生产仓管理' : categoryLabels[category.value!]
+  return getExportFilename(catLabel, subModuleLabels[subModule.value])
+})
 const exportTitle = computed(() => pageTitle.value)
 const exportData = computed(() => tableData.value as Record<string, unknown>[])
 
-const categoryLedgers = computed(() => dataStore.ledgersByCategory(category.value))
-const categoryDeviceTypes = computed(() => dataStore.deviceTypesByCategory(category.value))
-const centerOrgs = computed(() => dataStore.organizations.filter((o) => o.level === 2))
+const categoryLedgers = computed(() => {
+  if (aggregateAssets.value) {
+    return scopeLedgersByCategories(dataStore.ledgers, ['spare', 'instrument', 'tool']).filter((l) => l.warehouseId)
+  }
+  return scopeLedgersByCategories(dataStore.ledgers, category.value ? [category.value] : [])
+})
+const categoryDeviceTypes = computed(() => dataStore.deviceTypesByCategory(category.value!))
+
+const warehouseOptions = computed(() => {
+  let sites = scopeWarehouses(dataStore.warehouseSites)
+  if (ledgerForm.orgId) {
+    const orgIds = getOrgDescendantIds(dataStore.organizations, ledgerForm.orgId, true)
+    sites = sites.filter((w) => orgIds.includes(w.orgId))
+  }
+  return sites
+})
+const centerOrgs = computed(() =>
+  visibleOrganizations.value.filter((o) => isInventoryCenterOrg(o)),
+)
 
 const dialogTitle = computed(() => {
   const action = editingId.value ? '编辑' : '新增'
@@ -112,7 +194,7 @@ const ledgerForm = reactive({
   name: '',
   typeId: '',
   orgId: '',
-  warehouseName: '',
+  warehouseId: '',
   manufacturer: '',
   model: '',
   quantity: 1,
@@ -160,7 +242,7 @@ const ledgerRules: FormRules = {
   name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
   typeId: [{ required: true, message: '请选择设备类型', trigger: 'change' }],
   orgId: [{ required: true, message: '请选择组织机构', trigger: 'change' }],
-  warehouseName: [{ required: true, message: '请输入库位', trigger: 'blur' }],
+  warehouseId: [{ required: true, message: '请选择生产仓地点', trigger: 'change' }],
   quantity: [{ required: true, message: '请输入数量', trigger: 'blur' }],
 }
 
@@ -194,7 +276,7 @@ const dispatchRules: FormRules = {
 
 function resetForms() {
   Object.assign(ledgerForm, {
-    name: '', typeId: '', orgId: '', warehouseName: '', manufacturer: '', model: '',
+    name: '', typeId: '', orgId: '', warehouseId: '', manufacturer: '', model: '',
     quantity: 1, status: '在库', purchaseDate: todayStr(), warrantyDate: '',
   })
   Object.assign(inOutForm, {
@@ -216,7 +298,7 @@ function openDialog(row?: AssetLedger) {
   resetForms()
   if (row && subModule.value === 'ledger') {
     Object.assign(ledgerForm, {
-      name: row.name, typeId: row.typeId, orgId: row.orgId, warehouseName: row.warehouseName,
+      name: row.name, typeId: row.typeId, orgId: row.orgId, warehouseId: row.warehouseId,
       manufacturer: row.manufacturer, model: row.model, quantity: row.quantity, status: row.status,
       purchaseDate: row.purchaseDate, warrantyDate: row.warrantyDate,
     })
@@ -245,7 +327,7 @@ function openEditMaintenance(row: (typeof dataStore.maintenanceRecords)[0]) {
 
 function openDispatch() {
   Object.assign(dispatchForm, {
-    taskName: `2025年Q3${categoryLabels[category.value]}盘点`,
+    taskName: `2025年Q3${aggregateAssets.value ? '生产仓' : categoryLabels[category.value!]}盘点`,
     centerOrgId: centerOrgs.value[0]?.id ?? '',
     assignee: userStore.displayName || '管理员',
     deadline: '',
@@ -274,20 +356,25 @@ async function handleSave() {
           dataStore.updateLedger(editingId.value, { ...ledgerForm })
           ElMessage.success('台账已更新')
         } else {
-          dataStore.addLedger({ category: category.value, ...ledgerForm })
+          dataStore.addLedger({ category: category.value!, ...ledgerForm })
           ElMessage.success('台账已新增')
         }
         break
-      case 'inout':
-        dataStore.addInOutRecord({ category: category.value, ...inOutForm })
+      case 'inout': {
+        const ioLedger = dataStore.getLedgerByCode(inOutForm.assetCode)
+        if (!ioLedger) throw new Error('资产编码不存在')
+        dataStore.addInOutRecord({ category: ioLedger.category, ...inOutForm })
         ElMessage.success('出入库记录已保存，台账数量已同步')
         break
+      }
       case 'fault':
         if (editingId.value) {
           dataStore.updateFaultRecord(editingId.value, { ...faultForm })
           ElMessage.success('故障记录已更新')
         } else {
-          dataStore.addFaultRecord({ category: category.value, ...faultForm })
+          const faultLedger = dataStore.getLedgerByCode(faultForm.assetCode)
+          if (!faultLedger) throw new Error('资产编码不存在')
+          dataStore.addFaultRecord({ category: faultLedger.category, ...faultForm })
           ElMessage.success('故障记录已新增')
         }
         break
@@ -296,7 +383,9 @@ async function handleSave() {
           dataStore.updateMaintenanceRecord(editingId.value, { ...maintenanceForm })
           ElMessage.success('维修记录已更新')
         } else {
-          dataStore.addMaintenanceRecord({ category: category.value, ...maintenanceForm })
+          const mrLedger = dataStore.getLedgerByCode(maintenanceForm.assetCode)
+          if (!mrLedger) throw new Error('资产编码不存在')
+          dataStore.addMaintenanceRecord({ category: mrLedger.category, ...maintenanceForm })
           ElMessage.success('维修记录已新增')
         }
         break
@@ -314,7 +403,7 @@ async function handleDispatch() {
   const valid = await dispatchFormRef.value?.validate().catch(() => false)
   if (!valid) return
   try {
-    dataStore.dispatchInventoryTask({ category: category.value, ...dispatchForm })
+    dataStore.dispatchInventoryTask({ category: category.value!, ...dispatchForm })
     ElMessage.success('盘点任务已下发至各生产仓，可点击「下钻明细」查看')
     dispatchVisible.value = false
   } catch (e) {
@@ -383,6 +472,22 @@ function levelLabel(level: InventoryTask['level']) {
   return level === 'center' ? '中心汇总' : '生产仓'
 }
 
+function filterByWarehouse(warehouseId: string) {
+  if (subModule.value !== 'ledger') return
+  draft.value.warehouseId = warehouseId
+  applied.value.warehouseId = warehouseId
+  router.replace({ query: { ...route.query, warehouseId } })
+}
+
+watch(
+  () => ledgerForm.orgId,
+  () => {
+    if (ledgerForm.warehouseId && !warehouseOptions.value.some((w) => w.id === ledgerForm.warehouseId)) {
+      ledgerForm.warehouseId = warehouseOptions.value[0]?.id ?? ''
+    }
+  },
+)
+
 function onDialogOpen() {
   if (!editingId.value) resetForms()
 }
@@ -399,18 +504,22 @@ function onDialogOpen() {
           :data="exportData"
         />
         <div class="panel-actions__right">
-          <el-button v-if="subModule === 'inventory'" type="warning" @click="openDispatch">
+          <el-button
+            v-if="subModule === 'inventory' && !aggregateAssets && canDispatchInventory"
+            type="warning"
+            @click="openDispatch"
+          >
             <el-icon><Promotion /></el-icon> 下发盘点任务
           </el-button>
           <el-button
-            v-if="subModule !== 'inout'"
+            v-if="subModule !== 'inout' && canEditCurrent"
             type="primary"
             @click="openDialog()"
           >
             <el-icon><Plus /></el-icon>
             {{ subModule === 'ledger' ? '新增台账' : '新增记录' }}
           </el-button>
-          <el-button v-else type="primary" @click="openDialog()">
+          <el-button v-else-if="subModule === 'inout' && canEditCurrent" type="primary" @click="openDialog()">
             <el-icon><Plus /></el-icon> 登记出入库
           </el-button>
         </div>
@@ -434,7 +543,11 @@ function onDialogOpen() {
         <el-table-column prop="name" label="设备名称" min-width="120" />
         <el-table-column prop="typeName" label="设备类型" width="100" />
         <el-table-column prop="orgName" label="所属组织" width="120" />
-        <el-table-column prop="warehouseName" label="库位" width="90" />
+        <el-table-column prop="warehouseName" label="生产仓地点" min-width="140">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="filterByWarehouse(row.warehouseId)">{{ row.warehouseName }}</el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="quantity" label="数量" width="70" align="center" />
         <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
@@ -447,8 +560,10 @@ function onDialogOpen() {
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openAssetDetail(row.assetCode)">详情</el-button>
-            <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete('台账', () => dataStore.removeLedger(row.id))">删除</el-button>
+            <template v-if="canEditCurrent">
+              <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="handleDelete('台账', () => dataStore.removeLedger(row.id))">删除</el-button>
+            </template>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无台账数据" /></template>
@@ -470,7 +585,15 @@ function onDialogOpen() {
         <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openAssetDetail(row.assetCode)">详情</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete('记录', () => dataStore.removeInOutRecord(row.id))">删除</el-button>
+            <el-button
+              v-if="canEditCurrent"
+              link
+              type="danger"
+              size="small"
+              @click="handleDelete('记录', () => dataStore.removeInOutRecord(row.id))"
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无出入库记录" /></template>
@@ -491,7 +614,7 @@ function onDialogOpen() {
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openAssetDetail(row.assetCode)">详情</el-button>
             <el-button
-              v-if="row.status !== '已关闭' && !row.maintenanceId"
+              v-if="canEditCurrent && row.status !== '已关闭' && !row.maintenanceId"
               link
               type="warning"
               size="small"
@@ -499,8 +622,10 @@ function onDialogOpen() {
             >
               转维修
             </el-button>
-            <el-button link type="primary" size="small" @click="openEditFault(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete('记录', () => dataStore.removeFaultRecord(row.id))">删除</el-button>
+            <template v-if="canEditCurrent">
+              <el-button link type="primary" size="small" @click="openEditFault(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="handleDelete('记录', () => dataStore.removeFaultRecord(row.id))">删除</el-button>
+            </template>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无故障记录" /></template>
@@ -524,8 +649,10 @@ function onDialogOpen() {
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openAssetDetail(row.assetCode)">详情</el-button>
-            <el-button link type="primary" size="small" @click="openEditMaintenance(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete('记录', () => dataStore.removeMaintenanceRecord(row.id))">删除</el-button>
+            <template v-if="canEditCurrent">
+              <el-button link type="primary" size="small" @click="openEditMaintenance(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="handleDelete('记录', () => dataStore.removeMaintenanceRecord(row.id))">删除</el-button>
+            </template>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无维修记录" /></template>
@@ -551,7 +678,15 @@ function onDialogOpen() {
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openDrilldown(row)">下钻明细</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete('任务', () => dataStore.removeInventoryTask(row.id))">删除</el-button>
+            <el-button
+              v-if="canEditCurrent"
+              link
+              type="danger"
+              size="small"
+              @click="handleDelete('任务', () => dataStore.removeInventoryTask(row.id))"
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无盘点任务" /></template>
@@ -583,10 +718,19 @@ function onDialogOpen() {
         </el-form-item>
         <el-form-item label="组织机构" prop="orgId">
           <el-select v-model="ledgerForm.orgId" style="width: 100%">
-            <el-option v-for="org in dataStore.organizations" :key="org.id" :label="org.name" :value="org.id" />
+            <el-option v-for="org in visibleOrganizations" :key="org.id" :label="org.name" :value="org.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="库位" prop="warehouseName"><el-input v-model="ledgerForm.warehouseName" /></el-form-item>
+        <el-form-item label="生产仓地点" prop="warehouseId">
+          <el-select v-model="ledgerForm.warehouseId" placeholder="请选择已登记的生产仓" style="width: 100%" filterable>
+            <el-option
+              v-for="w in warehouseOptions"
+              :key="w.id"
+              :label="`${w.name}（${w.location}）`"
+              :value="w.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="生产厂家"><el-input v-model="ledgerForm.manufacturer" /></el-form-item>
         <el-form-item label="规格型号"><el-input v-model="ledgerForm.model" /></el-form-item>
         <el-form-item label="数量" prop="quantity"><el-input-number v-model="ledgerForm.quantity" :min="1" style="width: 100%" /></el-form-item>

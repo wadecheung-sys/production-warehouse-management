@@ -35,6 +35,7 @@ const rules: FormRules = {
 }
 
 const allPermissions = [
+  { group: '生产仓', items: ['warehouse:view', 'warehouse:edit'] },
   { group: '台账管理', items: ['ledger:view', 'ledger:edit'] },
   { group: '出入库', items: ['inout:view', 'inout:edit'] },
   { group: '故障维修', items: ['fault:view', 'fault:edit', 'maintenance:view', 'maintenance:edit'] },

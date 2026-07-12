@@ -15,7 +15,7 @@ const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
 
-const category = computed(() => (route.path.split('/').pop() ?? 'warehouse') as AssetCategory)
+const category = computed(() => route.path.split('/').pop() as AssetCategory)
 const categoryData = computed(() => dataStore.deviceTypes.filter((d) => d.category === category.value))
 
 const filterDefaults = { keyword: '', unit: '' }

@@ -9,9 +9,32 @@ const userStore = useUserStore()
 const loading = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: '123456',
+  username: '',
+  password: '',
 })
+
+const highlights = [
+  {
+    icon: 'OfficeBuilding',
+    title: '主数据统一',
+    desc: '生产仓地点、备品备件、仪器仪表、工器具分类建档与关联维护',
+  },
+  {
+    icon: 'Lock',
+    title: '分级权限管控',
+    desc: '按省、市、县、班组组织体系实现数据可见范围与操作权限隔离',
+  },
+  {
+    icon: 'Refresh',
+    title: '业务全程留痕',
+    desc: '台账、出入库、故障维修、盘点稽核形成完整业务闭环',
+  },
+  {
+    icon: 'Monitor',
+    title: '智慧仓监测',
+    desc: '温湿度、烟感等环境数据接入，支撑仓室运行状态感知',
+  },
+]
 
 async function handleLogin() {
   if (!form.username || !form.password) {
@@ -36,8 +59,8 @@ async function handleLogin() {
     <div class="login-panel">
       <div class="brand">
         <el-icon :size="40" color="#1677ff"><Box /></el-icon>
-        <h1>生产仓管理系统</h1>
-        <p>Production Warehouse Management System</p>
+        <h1>智慧化生产专业仓管理系统</h1>
+        <p>Smart Production Warehouse Management</p>
       </div>
       <el-form :model="form" label-position="top" @submit.prevent="handleLogin">
         <el-form-item label="账号">
@@ -61,12 +84,20 @@ async function handleLogin() {
     </div>
     <div class="login-bg">
       <div class="bg-content">
-        <h2>数字化生产仓管理</h2>
-        <ul>
-          <li>生产仓 · 备品备件 · 仪器仪表 · 工器具统一管理</li>
-          <li>台账录入、出入库、故障与维修全流程跟踪</li>
-          <li>按组织机构逐级下发盘点任务，自动统计完成情况</li>
-        </ul>
+        <p class="bg-eyebrow">POWER GRID · WAREHOUSE</p>
+        <h2>数字化生产专业仓管理</h2>
+        <p class="bg-lead">面向电力生产专业的仓室与物资一体化管理平台，支撑各级单位协同作业与精细管控。</p>
+        <div class="feature-grid">
+          <div v-for="item in highlights" :key="item.title" class="feature-card">
+            <div class="feature-card__icon">
+              <el-icon :size="22"><component :is="item.icon" /></el-icon>
+            </div>
+            <div>
+              <h3>{{ item.title }}</h3>
+              <p>{{ item.desc }}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -115,21 +146,70 @@ async function handleLogin() {
   justify-content: center;
   background: linear-gradient(135deg, #1677ff 0%, #0958d9 50%, #001529 100%);
   color: #fff;
-  padding: 40px;
+  padding: 48px;
 
   .bg-content {
-    max-width: 520px;
+    max-width: 560px;
+  }
 
-    h2 {
-      font-size: 32px;
-      margin: 0 0 24px;
-    }
+  .bg-eyebrow {
+    margin: 0 0 12px;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    opacity: 0.72;
+  }
 
-    ul {
-      padding-left: 20px;
-      line-height: 2;
-      opacity: 0.92;
-    }
+  h2 {
+    font-size: 32px;
+    margin: 0 0 16px;
+    line-height: 1.3;
+  }
+
+  .bg-lead {
+    margin: 0 0 28px;
+    font-size: 15px;
+    line-height: 1.7;
+    opacity: 0.9;
+  }
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.feature-card {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(4px);
+
+  &__icon {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.55;
+    opacity: 0.82;
   }
 }
 

@@ -6,7 +6,6 @@ export function genId(prefix = 'id'): string {
 }
 
 const categoryCodePrefix: Record<string, string> = {
-  warehouse: 'WH',
   spare: 'SP',
   instrument: 'IN',
   tool: 'TL',

@@ -1,10 +1,19 @@
-export type AssetCategory = 'warehouse' | 'spare' | 'instrument' | 'tool'
+export type AssetCategory = 'spare' | 'instrument' | 'tool'
+
+/** 设备台账类别（不含生产仓地点本身） */
+export type AssetLedgerCategory = AssetCategory
+
+/** 组织机构类型：东北分部 → 省公司 → 地市公司 → 县公司 → 班组 */
+export type OrgType = 'division' | 'province' | 'city' | 'county' | 'team'
 
 export interface Organization {
   id: string
   name: string
+  code: string
+  type: OrgType
   parentId: string | null
   level: number
+  shortName?: string
   leader?: string
   phone?: string
 }
@@ -15,6 +24,24 @@ export interface Role {
   code: string
   description: string
   permissions: string[]
+}
+
+/** 用户数据可见范围 */
+export type DataScope = 'all' | 'org_and_children' | 'org_only'
+
+/** 登录用户上下文（阶段 5） */
+export interface UserContext {
+  token: string
+  username: string
+  displayName: string
+  personId: string
+  orgId: string
+  orgName: string
+  orgType: OrgType
+  roleId: string
+  roleName: string
+  permissions: string[]
+  dataScope: DataScope
 }
 
 export interface Person {
@@ -29,6 +56,38 @@ export interface Person {
   status: '在职' | '离职'
 }
 
+/** 生产仓地点 / 仓室主数据（阶段 2） */
+export type WarehouseUseStatus = '在用' | '停用' | '改造中' | '待建'
+
+export type WarehouseAssetNature = '自有' | '租赁' | '借用'
+
+export type WarehouseSiteType = '备品仓' | '仪器室' | '工器具室' | '综合仓'
+
+export interface WarehouseSite {
+  id: string
+  code: string
+  name: string
+  location: string
+  orgId: string
+  orgName: string
+  assetNature: WarehouseAssetNature
+  useStatus: WarehouseUseStatus
+  area: number
+  keeperId: string
+  keeperName: string
+  contactPhone?: string
+  warehouseType?: WarehouseSiteType
+  isSmart?: boolean
+  remark?: string
+  createdAt: string
+}
+
+export const warehouseUseStatusOptions: WarehouseUseStatus[] = ['在用', '停用', '改造中', '待建']
+
+export const warehouseAssetNatureOptions: WarehouseAssetNature[] = ['自有', '租赁', '借用']
+
+export const warehouseSiteTypeOptions: WarehouseSiteType[] = ['备品仓', '仪器室', '工器具室', '综合仓']
+
 export interface Manufacturer {
   id: string
   name: string
@@ -42,7 +101,7 @@ export interface Manufacturer {
 export interface DeviceType {
   id: string
   name: string
-  category: 'warehouse' | 'spare' | 'instrument' | 'tool'
+  category: AssetCategory
   code: string
   unit: string
   description: string
@@ -57,6 +116,7 @@ export interface AssetLedger {
   typeName: string
   orgId: string
   orgName: string
+  warehouseId: string
   warehouseName: string
   manufacturer: string
   model: string
@@ -164,7 +224,6 @@ export interface MenuItem {
 }
 
 export const categoryLabels: Record<AssetCategory, string> = {
-  warehouse: '生产仓',
   spare: '备品备件',
   instrument: '仪器仪表',
   tool: '工器具',

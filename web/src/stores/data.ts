@@ -15,14 +15,28 @@ import type {
   Organization,
   Person,
   Role,
+  WarehouseSite,
 } from '@/types'
 import { genAssetCode, genId, nowStr } from '@/utils/id'
+import {
+  buildOrgTree,
+  getOrgChildren,
+  getOrgDescendantIds,
+  isInventoryCenterOrg,
+  levelFromType,
+  validateOrgHierarchy,
+} from '@/utils/org'
 import { clearBusinessData, loadJson, saveJson } from '@/utils/persist'
 
+/** 业务数据结构版本；组织/仓室/台账模型升级时递增，旧数据将重置为种子 */
+export const BUSINESS_SCHEMA_VERSION = 3
+
 interface BusinessData {
+  schemaVersion: number
   organizations: Organization[]
   roles: Role[]
   persons: Person[]
+  warehouseSites: WarehouseSite[]
   manufacturers: Manufacturer[]
   deviceTypes: DeviceType[]
   ledgers: AssetLedger[]
@@ -35,9 +49,11 @@ interface BusinessData {
 
 function getSeed(): BusinessData {
   return {
+    schemaVersion: BUSINESS_SCHEMA_VERSION,
     organizations: [...seed.organizations],
     roles: [...seed.roles],
     persons: [...seed.persons],
+    warehouseSites: [...seed.warehouseSites],
     manufacturers: [...seed.manufacturers],
     deviceTypes: [...seed.deviceTypes],
     ledgers: [...seed.ledgers],
@@ -49,14 +65,25 @@ function getSeed(): BusinessData {
   }
 }
 
+function loadBusinessData(): BusinessData {
+  const fallback = getSeed()
+  const raw = loadJson<Partial<BusinessData> | null>('business', null)
+  if (!raw || raw.schemaVersion !== BUSINESS_SCHEMA_VERSION) return fallback
+  if (!raw.organizations?.length || !raw.organizations[0]?.type) return fallback
+  if (!raw.warehouseSites?.length) return fallback
+  if (!raw.ledgers?.length || !raw.ledgers[0]?.warehouseId) return fallback
+  return raw as BusinessData
+}
+
 export const useDataStore = defineStore('data', () => {
-  const data = ref<BusinessData>(loadJson('business', getSeed()))
+  const data = ref<BusinessData>(loadBusinessData())
 
   watch(data, (v) => saveJson('business', v), { deep: true })
 
   const organizations = computed(() => data.value.organizations)
   const roles = computed(() => data.value.roles)
   const persons = computed(() => data.value.persons)
+  const warehouseSites = computed(() => data.value.warehouseSites)
   const manufacturers = computed(() => data.value.manufacturers)
   const deviceTypes = computed(() => data.value.deviceTypes)
   const ledgers = computed(() => data.value.ledgers)
@@ -68,6 +95,26 @@ export const useDataStore = defineStore('data', () => {
 
   function getOrg(id: string) {
     return data.value.organizations.find((o) => o.id === id)
+  }
+
+  function getPerson(id: string) {
+    return data.value.persons.find((p) => p.id === id)
+  }
+
+  function getWarehouseSite(id: string) {
+    return data.value.warehouseSites.find((w) => w.id === id)
+  }
+
+  function genWarehouseCode(): string {
+    const year = new Date().getFullYear()
+    const existing = data.value.warehouseSites.map((w) => w.code)
+    let seq = 1
+    let code = `WS${year}${String(seq).padStart(4, '0')}`
+    while (existing.includes(code)) {
+      seq += 1
+      code = `WS${year}${String(seq).padStart(4, '0')}`
+    }
+    return code
   }
 
   function getRole(id: string) {
@@ -86,7 +133,7 @@ export const useDataStore = defineStore('data', () => {
     return data.value.ledgers.filter((l) => l.category === category)
   }
 
-  function deviceTypesByCategory(category: AssetCategory | Manufacturer['category'] | 'warehouse') {
+  function deviceTypesByCategory(category: AssetCategory) {
     return data.value.deviceTypes.filter((d) => d.category === category)
   }
 
@@ -94,17 +141,58 @@ export const useDataStore = defineStore('data', () => {
     return data.value.manufacturers.filter((m) => m.category === category)
   }
 
+  function getOrgTree() {
+    return buildOrgTree(data.value.organizations)
+  }
+
+  function getOrgChildrenIds(parentId: string) {
+    return getOrgChildren(data.value.organizations, parentId).map((o) => o.id)
+  }
+
+  function getOrgDescendantIdsFrom(rootId: string, includeSelf = true) {
+    return getOrgDescendantIds(data.value.organizations, rootId, includeSelf)
+  }
+
   // --- Organization ---
   function addOrganization(item: Omit<Organization, 'id' | 'level'>) {
     const parent = item.parentId ? getOrg(item.parentId) : null
-    const level = parent ? parent.level + 1 : 1
+    const hierarchyError = validateOrgHierarchy(item.type, parent ?? null)
+    if (hierarchyError) throw new Error(hierarchyError)
+    if (data.value.organizations.some((o) => o.code === item.code)) {
+      throw new Error('组织编码已存在')
+    }
+    const level = levelFromType(item.type)
     data.value.organizations.push({ ...item, id: genId('org'), level })
   }
 
-  function updateOrganization(id: string, patch: Partial<Organization>) {
+  function updateOrganization(id: string, patch: Partial<Omit<Organization, 'id'>>) {
     const idx = data.value.organizations.findIndex((o) => o.id === id)
     if (idx < 0) return
-    const updated = { ...data.value.organizations[idx], ...patch, id }
+    const current = data.value.organizations[idx]
+    const nextType = patch.type ?? current.type
+    const nextParentId = patch.parentId !== undefined ? patch.parentId : current.parentId
+    const parent = nextParentId ? getOrg(nextParentId) : null
+
+    if (nextParentId === id) throw new Error('上级组织不能为自身')
+    if (nextParentId && getOrgDescendantIdsFrom(id, false).includes(nextParentId)) {
+      throw new Error('上级组织不能为下级节点')
+    }
+
+    const hierarchyError = validateOrgHierarchy(nextType, parent ?? null)
+    if (hierarchyError) throw new Error(hierarchyError)
+
+    if (patch.code && data.value.organizations.some((o) => o.code === patch.code && o.id !== id)) {
+      throw new Error('组织编码已存在')
+    }
+
+    const updated: Organization = {
+      ...current,
+      ...patch,
+      id,
+      type: nextType,
+      parentId: nextParentId,
+      level: levelFromType(nextType),
+    }
     data.value.organizations[idx] = updated
     if (patch.name) {
       data.value.persons.forEach((p) => {
@@ -122,6 +210,12 @@ export const useDataStore = defineStore('data', () => {
   function removeOrganization(id: string) {
     const hasChildren = data.value.organizations.some((o) => o.parentId === id)
     if (hasChildren) throw new Error('请先删除下级组织')
+    const inUse =
+      data.value.persons.some((p) => p.orgId === id) ||
+      data.value.ledgers.some((l) => l.orgId === id) ||
+      data.value.inventoryTasks.some((t) => t.orgId === id) ||
+      data.value.warehouseSites.some((w) => w.orgId === id)
+    if (inUse) throw new Error('该组织仍有关联人员或业务数据')
     data.value.organizations = data.value.organizations.filter((o) => o.id !== id)
   }
 
@@ -175,7 +269,64 @@ export const useDataStore = defineStore('data', () => {
   }
 
   function removePerson(id: string) {
+    const inUse = data.value.warehouseSites.some((w) => w.keeperId === id)
+    if (inUse) throw new Error('该人员仍为生产仓库管员，请先调整仓室信息')
     data.value.persons = data.value.persons.filter((p) => p.id !== id)
+  }
+
+  // --- WarehouseSite ---
+  function addWarehouseSite(item: Omit<WarehouseSite, 'id' | 'orgName' | 'keeperName' | 'createdAt'>) {
+    const org = getOrg(item.orgId)
+    const keeper = getPerson(item.keeperId)
+    if (!org) throw new Error('所属单位无效')
+    if (!keeper) throw new Error('库管人员无效')
+    if (data.value.warehouseSites.some((w) => w.code === item.code)) {
+      throw new Error('仓室编码已存在')
+    }
+    data.value.warehouseSites.unshift({
+      ...item,
+      id: genId('ws'),
+      orgName: org.name,
+      keeperName: keeper.name,
+      contactPhone: item.contactPhone || keeper.phone,
+      createdAt: nowStr(),
+    })
+  }
+
+  function updateWarehouseSite(id: string, patch: Partial<Omit<WarehouseSite, 'id' | 'createdAt'>>) {
+    const idx = data.value.warehouseSites.findIndex((w) => w.id === id)
+    if (idx < 0) return
+    const current = data.value.warehouseSites[idx]
+    const org = patch.orgId ? getOrg(patch.orgId) : getOrg(current.orgId)
+    const keeper = patch.keeperId ? getPerson(patch.keeperId) : getPerson(current.keeperId)
+    if (!org) throw new Error('所属单位无效')
+    if (!keeper) throw new Error('库管人员无效')
+    if (patch.code && data.value.warehouseSites.some((w) => w.code === patch.code && w.id !== id)) {
+      throw new Error('仓室编码已存在')
+    }
+    data.value.warehouseSites[idx] = {
+      ...current,
+      ...patch,
+      id,
+      orgName: org.name,
+      keeperName: keeper.name,
+      contactPhone: patch.contactPhone ?? keeper.phone ?? current.contactPhone,
+    }
+    if (patch.name) {
+      data.value.ledgers.forEach((l) => {
+        if (l.warehouseId === id) l.warehouseName = patch.name!
+      })
+      data.value.inventoryLineItems.forEach((line) => {
+        const ledger = data.value.ledgers.find((l) => l.assetCode === line.assetCode)
+        if (ledger?.warehouseId === id) line.warehouseName = patch.name!
+      })
+    }
+  }
+
+  function removeWarehouseSite(id: string) {
+    const linked = data.value.ledgers.some((l) => l.warehouseId === id)
+    if (linked) throw new Error('该仓室仍有关联设备台账，请先调整或删除设备')
+    data.value.warehouseSites = data.value.warehouseSites.filter((w) => w.id !== id)
   }
 
   // --- Manufacturer ---
@@ -219,10 +370,12 @@ export const useDataStore = defineStore('data', () => {
   }
 
   // --- Ledger ---
-  function addLedger(item: Omit<AssetLedger, 'id' | 'assetCode' | 'typeName' | 'orgName' | 'unit'>) {
+  function addLedger(item: Omit<AssetLedger, 'id' | 'assetCode' | 'typeName' | 'orgName' | 'unit' | 'warehouseName'>) {
     const dt = getDeviceType(item.typeId)
     const org = getOrg(item.orgId)
+    const wh = getWarehouseSite(item.warehouseId)
     if (!dt || !org) throw new Error('设备类型或组织无效')
+    if (!wh) throw new Error('请选择有效的生产仓地点')
     const assetCode = genAssetCode(
       item.category,
       data.value.ledgers.map((l) => l.assetCode),
@@ -233,6 +386,7 @@ export const useDataStore = defineStore('data', () => {
       assetCode,
       typeName: dt.name,
       orgName: org.name,
+      warehouseName: wh.name,
       unit: dt.unit,
     })
   }
@@ -243,12 +397,15 @@ export const useDataStore = defineStore('data', () => {
     const cur = data.value.ledgers[idx]
     const dt = patch.typeId ? getDeviceType(patch.typeId) : getDeviceType(cur.typeId)
     const org = patch.orgId ? getOrg(patch.orgId) : getOrg(cur.orgId)
+    const wh = patch.warehouseId ? getWarehouseSite(patch.warehouseId) : getWarehouseSite(cur.warehouseId)
+    if (patch.warehouseId && !wh) throw new Error('请选择有效的生产仓地点')
     data.value.ledgers[idx] = {
       ...cur,
       ...patch,
       id,
       typeName: dt?.name ?? cur.typeName,
       orgName: org?.name ?? cur.orgName,
+      warehouseName: wh?.name ?? cur.warehouseName,
       unit: dt?.unit ?? cur.unit,
     }
   }
@@ -390,7 +547,7 @@ export const useDataStore = defineStore('data', () => {
         type: 'ledger',
         title: '台账建档',
         time: ledger.purchaseDate,
-        description: `${ledger.name}（${ledger.assetCode}）录入台账，库位 ${ledger.warehouseName}`,
+        description: `${ledger.name}（${ledger.assetCode}）录入台账，存放于 ${ledger.warehouseName}`,
         tag: ledger.status,
       })
     }
@@ -484,10 +641,12 @@ export const useDataStore = defineStore('data', () => {
     deadline: string
   }) {
     const center = getOrg(params.centerOrgId)
-    if (!center || center.level !== 2) throw new Error('请选择二级生产中心组织')
+    if (!center || !isInventoryCenterOrg(center)) {
+      throw new Error('请选择省公司或地市公司作为盘点汇总组织')
+    }
 
     const childOrgs = data.value.organizations.filter((o) => o.parentId === params.centerOrgId)
-    if (!childOrgs.length) throw new Error('该中心下无下级生产仓')
+    if (!childOrgs.length) throw new Error('该组织下无下级单位可下发盘点')
 
     const rootId = genId('inv')
     let totalAll = 0
@@ -593,7 +752,7 @@ export const useDataStore = defineStore('data', () => {
 
   // --- Dashboard stats ---
   const dashboardStats = computed(() => ({
-    warehouseCount: data.value.deviceTypes.filter((d) => d.category === 'warehouse').length,
+    warehouseCount: data.value.warehouseSites.length,
     spareCount: data.value.ledgers.filter((l) => l.category === 'spare').reduce((s, l) => s + l.quantity, 0),
     instrumentCount: data.value.ledgers.filter((l) => l.category === 'instrument').reduce((s, l) => s + l.quantity, 0),
     toolCount: data.value.ledgers.filter((l) => l.category === 'tool').reduce((s, l) => s + l.quantity, 0),
@@ -619,6 +778,7 @@ export const useDataStore = defineStore('data', () => {
     organizations,
     roles,
     persons,
+    warehouseSites,
     manufacturers,
     deviceTypes,
     ledgers,
@@ -629,6 +789,12 @@ export const useDataStore = defineStore('data', () => {
     inventoryLineItems,
     dashboardStats,
     getOrg,
+    getOrgTree,
+    getOrgChildrenIds,
+    getOrgDescendantIdsFrom,
+    getPerson,
+    getWarehouseSite,
+    genWarehouseCode,
     getRole,
     getDeviceType,
     getLedgerByCode,
@@ -644,6 +810,9 @@ export const useDataStore = defineStore('data', () => {
     addPerson,
     updatePerson,
     removePerson,
+    addWarehouseSite,
+    updateWarehouseSite,
+    removeWarehouseSite,
     addManufacturer,
     updateManufacturer,
     removeManufacturer,

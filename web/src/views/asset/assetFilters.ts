@@ -8,14 +8,15 @@ import type {
   SubModule,
 } from '@/types'
 import { matchDateRange, matchExact, matchKeyword, uniqueOptions } from '@/utils/filter'
-import type { Organization } from '@/types'
+import { formatOrgOptionLabel } from '@/utils/org'
+import type { Organization, WarehouseSite } from '@/types'
 
 export interface LedgerFilters {
   keyword: string
   orgId: string
   typeName: string
   status: string
-  warehouseName: string
+  warehouseId: string
 }
 
 export interface InOutFilters {
@@ -52,7 +53,7 @@ export interface InventoryFilters {
 
 const orgOptions = (organizations: Organization[]) => [
   { label: '全部组织', value: '' },
-  ...organizations.map((o) => ({ label: o.name, value: o.id })),
+  ...organizations.map((o) => ({ label: formatOrgOptionLabel(o), value: o.id })),
 ]
 
 const orgNameOptions = (names: string[]) => uniqueOptions(names, '全部组织')
@@ -62,13 +63,28 @@ export const ledgerFilterDefaults: LedgerFilters = {
   orgId: '',
   typeName: '',
   status: '',
-  warehouseName: '',
+  warehouseId: '',
 }
 
-export function buildLedgerFilterFields(items: AssetLedger[], organizations: Organization[]): FilterField[] {
+export function buildLedgerFilterFields(
+  items: AssetLedger[],
+  organizations: Organization[],
+  warehouseSites: WarehouseSite[],
+): FilterField[] {
+  const siteOptions = warehouseSites.map((w) => ({
+    label: `${w.name}（${w.code}）`,
+    value: w.id,
+  }))
   return [
     { key: 'keyword', type: 'input', placeholder: '设备名称/编码', width: '180px' },
     { key: 'orgId', type: 'select', placeholder: '组织机构', options: orgOptions(organizations), width: '150px' },
+    {
+      key: 'warehouseId',
+      type: 'select',
+      placeholder: '生产仓地点',
+      options: [{ label: '全部仓室', value: '' }, ...siteOptions],
+      width: '180px',
+    },
     {
       key: 'typeName',
       type: 'select',
@@ -86,13 +102,6 @@ export function buildLedgerFilterFields(items: AssetLedger[], organizations: Org
       options: uniqueOptions(items.map((i) => i.status), '全部状态'),
       width: '120px',
     },
-    {
-      key: 'warehouseName',
-      type: 'select',
-      placeholder: '库位',
-      options: uniqueOptions(items.map((i) => i.warehouseName), '全部库位'),
-      width: '120px',
-    },
   ]
 }
 
@@ -101,8 +110,8 @@ export function matchLedger(item: AssetLedger, f: LedgerFilters): boolean {
     matchExact(item.orgId, f.orgId) &&
     matchExact(item.typeName, f.typeName) &&
     matchExact(item.status, f.status) &&
-    matchExact(item.warehouseName, f.warehouseName) &&
-    matchKeyword(f.keyword, item.name, item.assetCode, item.manufacturer)
+    matchExact(item.warehouseId, f.warehouseId) &&
+    matchKeyword(f.keyword, item.name, item.assetCode, item.manufacturer, item.warehouseName)
   )
 }
 
@@ -329,10 +338,11 @@ export function buildFilterFields(
   subModule: SubModule,
   data: unknown[],
   organizations: Organization[],
+  warehouseSites: WarehouseSite[] = [],
 ): FilterField[] {
   switch (subModule) {
     case 'ledger':
-      return buildLedgerFilterFields(data as AssetLedger[], organizations)
+      return buildLedgerFilterFields(data as AssetLedger[], organizations, warehouseSites)
     case 'inout':
       return buildInOutFilterFieldsFromData(data as InOutRecord[])
     case 'fault':

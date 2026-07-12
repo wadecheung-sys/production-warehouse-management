@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import type { AssetLifecycleEvent } from '@/types'
 import { useDataStore } from '@/stores/data'
 
@@ -9,6 +10,7 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { default: false })
 const dataStore = useDataStore()
+const router = useRouter()
 
 const ledger = computed(() =>
   props.assetCode ? dataStore.getLedgerByCode(props.assetCode) : null,
@@ -28,6 +30,13 @@ const stats = computed(() => {
   }
 })
 
+function goWarehouseLedger() {
+  const item = ledger.value
+  if (!item) return
+  visible.value = false
+  router.push({ path: `/${item.category}/ledger`, query: { warehouseId: item.warehouseId } })
+}
+
 function eventIcon(type: AssetLifecycleEvent['type']) {
   const map = { ledger: 'Document', inout: 'Sort', fault: 'Warning', maintenance: 'Tools', inventory: 'List' }
   return map[type] ?? 'InfoFilled'
@@ -46,7 +55,9 @@ function eventIcon(type: AssetLifecycleEvent['type']) {
         <el-descriptions-item label="资产编码">{{ ledger.assetCode }}</el-descriptions-item>
         <el-descriptions-item label="设备类型">{{ ledger.typeName }}</el-descriptions-item>
         <el-descriptions-item label="所属组织">{{ ledger.orgName }}</el-descriptions-item>
-        <el-descriptions-item label="库位">{{ ledger.warehouseName }}</el-descriptions-item>
+        <el-descriptions-item label="生产仓地点">
+          <el-button link type="primary" @click="goWarehouseLedger">{{ ledger.warehouseName }}</el-button>
+        </el-descriptions-item>
         <el-descriptions-item label="库存">{{ ledger.quantity }} {{ ledger.unit }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag size="small">{{ ledger.status }}</el-tag>
