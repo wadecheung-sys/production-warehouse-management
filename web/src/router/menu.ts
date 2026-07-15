@@ -1,4 +1,4 @@
-import type { AssetCategory, SubModule } from '@/types'
+import type { AssetCategory, InOutPageAction, InventoryPageAction, SubModule } from '@/types'
 
 export interface RouteMeta {
   title: string
@@ -6,90 +6,155 @@ export interface RouteMeta {
   hidden?: boolean
   category?: AssetCategory
   subModule?: SubModule
-  /** 生产仓管理下聚合备品/仪器/工器具业务数据 */
   aggregateAssets?: boolean
+  inoutAction?: InOutPageAction
+  inventoryAction?: InventoryPageAction
+  quotaAction?: 'rules' | 'params' | 'results' | 'catalog'
 }
 
-const assetModules: SubModule[] = ['ledger', 'inout', 'fault', 'maintenance', 'inventory']
-
-function assetSubRoutes(prefix: string, category: AssetCategory, ledgerTitle = '台账录入') {
-  const modulePaths: Record<SubModule, string> = {
-    ledger: 'ledger',
-    inout: 'inout',
-    fault: 'fault',
-    maintenance: 'maintenance',
-    inventory: 'inventory',
-  }
-  const moduleTitles: Record<SubModule, string> = {
-    ledger: ledgerTitle,
-    inout: '出入库记录',
-    fault: '故障记录',
-    maintenance: '维修记录',
-    inventory: '盘点记录',
-  }
-
-  return assetModules.map((mod) => ({
-    path: modulePaths[mod],
-    name: `${prefix}-${mod}`,
-    component: () => import('@/views/asset/AssetModuleView.vue'),
-    meta: { title: moduleTitles[mod], category, subModule: mod } satisfies RouteMeta,
-  }))
-}
-
-function assetRoutes(prefix: string, category: AssetCategory, title: string, ledgerTitle?: string) {
-  const base = `/${prefix}`
+function leaf(
+  path: string,
+  name: string,
+  title: string,
+  component: () => Promise<unknown>,
+  meta: Partial<RouteMeta> = {},
+) {
   return {
-    path: base,
+    path,
+    name,
+    component,
+    meta: { title, ...meta } satisfies RouteMeta,
+  }
+}
+
+function assetInOutChildren(prefix: string, category: AssetCategory) {
+  const pages: { path: string; title: string; action: InOutPageAction }[] = [
+    { path: 'in-apply', title: '入库申请单', action: 'in-apply' },
+    { path: 'in-approve', title: '入库审批', action: 'in-approve' },
+    { path: 'in-confirm', title: '入库确认', action: 'in-confirm' },
+    { path: 'out-apply', title: '出库申请单', action: 'out-apply' },
+    { path: 'out-approve', title: '出库审批', action: 'out-approve' },
+    { path: 'out-confirm', title: '出库确认', action: 'out-confirm' },
+    { path: 'stock-status', title: '在库状态', action: 'stock-status' },
+    { path: 'shortage', title: '缺额视图', action: 'shortage' },
+    { path: 'log', title: '出入库记录', action: 'inout-log' },
+  ]
+  return {
+    path: 'inout',
+    component: () => import('@/layouts/RouteView.vue'),
+    meta: { title: '出入库管理', icon: 'Sort' },
+    redirect: `/${prefix}/inout/in-apply`,
+    children: pages.map((p) =>
+      leaf(p.path, `${prefix}-inout-${p.path}`, p.title, () => import('@/views/inout/StockBillView.vue'), {
+        category,
+        inoutAction: p.action,
+      }),
+    ),
+  }
+}
+
+function assetInventoryChildren(prefix: string, category: AssetCategory) {
+  const pages: { path: string; title: string; action: InventoryPageAction }[] = [
+    { path: 'plan', title: '计划下达', action: 'plan' },
+    { path: 'execute', title: '执行盘点', action: 'execute' },
+    { path: 'progress', title: '进度管控', action: 'progress' },
+  ]
+  return {
+    path: 'inventory',
+    component: () => import('@/layouts/RouteView.vue'),
+    meta: { title: '盘点管理', icon: 'DocumentChecked' },
+    redirect: `/${prefix}/inventory/plan`,
+    children: pages.map((p) =>
+      leaf(p.path, `${prefix}-inv-${p.path}`, p.title, () => import('@/views/inventory/InventoryManageView.vue'), {
+        category,
+        inventoryAction: p.action,
+      }),
+    ),
+  }
+}
+
+function assetCategoryRoutes(prefix: string, category: AssetCategory, title: string) {
+  return {
+    path: `/${prefix}`,
     component: () => import('@/layouts/RouteView.vue'),
     meta: { title, icon: 'Box' },
-    redirect: `${base}/ledger`,
-    children: assetSubRoutes(prefix, category, ledgerTitle),
+    redirect: `/${prefix}/ledger`,
+    children: [
+      leaf('ledger', `${prefix}-ledger`, '台账管理', () => import('@/views/asset/LedgerManageView.vue'), {
+        category,
+        subModule: 'ledger',
+      }),
+      assetInOutChildren(prefix, category),
+      leaf('fault', `${prefix}-fault`, '故障记录', () => import('@/views/asset/AssetModuleView.vue'), {
+        category,
+        subModule: 'fault',
+      }),
+      leaf(
+        'maintenance',
+        `${prefix}-maintenance`,
+        '维修记录',
+        () => import('@/views/asset/AssetModuleView.vue'),
+        { category, subModule: 'maintenance' },
+      ),
+      assetInventoryChildren(prefix, category),
+    ],
   }
 }
 
-/** 生产仓管理：台账页独立为仓室主数据，其余子模块暂保留资产视图 */
 function warehouseRoutes() {
-  const base = '/warehouse'
-  const subModules: SubModule[] = ['inout', 'fault', 'maintenance', 'inventory']
-  const modulePaths: Record<SubModule, string> = {
-    ledger: 'ledger',
-    inout: 'inout',
-    fault: 'fault',
-    maintenance: 'maintenance',
-    inventory: 'inventory',
-  }
-  const moduleTitles: Record<SubModule, string> = {
-    ledger: '生产仓台账',
-    inout: '出入库记录',
-    fault: '故障记录',
-    maintenance: '维修记录',
-    inventory: '盘点记录',
-  }
-
   return {
-    path: base,
+    path: '/warehouse',
     component: () => import('@/layouts/RouteView.vue'),
-    meta: { title: '生产仓管理', icon: 'Box' },
-    redirect: `${base}/overview`,
+    meta: { title: '生产仓管理', icon: 'House' },
+    redirect: '/warehouse/overview',
     children: [
+      leaf('overview', 'warehouse-overview', '生产仓概览', () => import('@/views/warehouse/WarehouseOverviewView.vue')),
+      leaf('ledger', 'warehouse-ledger', '生产仓台账', () => import('@/views/warehouse/WarehouseLedgerView.vue')),
       {
-        path: 'overview',
-        name: 'warehouse-overview',
-        component: () => import('@/views/warehouse/WarehouseOverviewView.vue'),
-        meta: { title: '生产仓概览' } satisfies RouteMeta,
+        path: 'inout',
+        component: () => import('@/layouts/RouteView.vue'),
+        meta: { title: '出入库管理' },
+        redirect: '/warehouse/inout/log',
+        children: [
+          leaf('log', 'warehouse-inout-log', '出入库记录', () => import('@/views/inout/StockBillView.vue'), {
+            aggregateAssets: true,
+            inoutAction: 'inout-log',
+          }),
+          leaf(
+            'stock-status',
+            'warehouse-stock-status',
+            '在库状态',
+            () => import('@/views/inout/StockBillView.vue'),
+            { aggregateAssets: true, inoutAction: 'stock-status' },
+          ),
+        ],
       },
+      leaf('fault', 'warehouse-fault', '故障记录', () => import('@/views/asset/AssetModuleView.vue'), {
+        aggregateAssets: true,
+        subModule: 'fault',
+      }),
+      leaf(
+        'maintenance',
+        'warehouse-maintenance',
+        '维修记录',
+        () => import('@/views/asset/AssetModuleView.vue'),
+        { aggregateAssets: true, subModule: 'maintenance' },
+      ),
       {
-        path: 'ledger',
-        name: 'warehouse-ledger',
-        component: () => import('@/views/warehouse/WarehouseLedgerView.vue'),
-        meta: { title: '生产仓台账' } satisfies RouteMeta,
+        path: 'inventory',
+        component: () => import('@/layouts/RouteView.vue'),
+        meta: { title: '盘点管理' },
+        redirect: '/warehouse/inventory/progress',
+        children: [
+          leaf(
+            'progress',
+            'warehouse-inv-progress',
+            '进度管控',
+            () => import('@/views/inventory/InventoryManageView.vue'),
+            { aggregateAssets: true, inventoryAction: 'progress' },
+          ),
+        ],
       },
-      ...subModules.map((mod) => ({
-        path: modulePaths[mod],
-        name: `warehouse-${mod}`,
-        component: () => import('@/views/asset/AssetModuleView.vue'),
-        meta: { title: moduleTitles[mod], aggregateAssets: true, subModule: mod } satisfies RouteMeta,
-      })),
     ],
   }
 }
@@ -97,13 +162,38 @@ function warehouseRoutes() {
 export const menuRoutes = [
   {
     path: '/dashboard',
-    meta: { title: '工作台', icon: 'Odometer' },
-    component: () => import('@/views/dashboard/DashboardView.vue'),
+    meta: { title: '经营分析', icon: 'DataAnalysis' },
+    component: () => import('@/views/dashboard/AnalyticsHomeView.vue'),
   },
   warehouseRoutes(),
-  assetRoutes('spare', 'spare', '备品备件管理'),
-  assetRoutes('instrument', 'instrument', '仪器仪表管理'),
-  assetRoutes('tool', 'tool', '工器具管理'),
+  assetCategoryRoutes('spare', 'spare', '备品备件管理'),
+  assetCategoryRoutes('instrument', 'instrument', '仪器仪表管理'),
+  assetCategoryRoutes('tool', 'tool', '工器具管理'),
+  {
+    path: '/quota',
+    component: () => import('@/layouts/RouteView.vue'),
+    meta: { title: '定额管理', icon: 'Calculator' },
+    redirect: '/quota/rules',
+    children: [
+      leaf('rules', 'quota-rules', '定额规则', () => import('@/views/quota/QuotaManageView.vue'), {
+        quotaAction: 'rules',
+      }),
+      leaf('params', 'quota-params', '单位参数填报', () => import('@/views/quota/QuotaManageView.vue'), {
+        quotaAction: 'params',
+      }),
+      leaf('results', 'quota-results', '定额测算结果', () => import('@/views/quota/QuotaManageView.vue'), {
+        quotaAction: 'results',
+      }),
+      leaf('catalog', 'quota-catalog', '一仓一策目录', () => import('@/views/quota/QuotaManageView.vue'), {
+        quotaAction: 'catalog',
+      }),
+    ],
+  },
+  {
+    path: '/alerts',
+    meta: { title: '告警中心', icon: 'Bell' },
+    component: () => import('@/views/alert/AlertCenterView.vue'),
+  },
   {
     path: '/personnel',
     meta: { title: '人员管理', icon: 'User' },

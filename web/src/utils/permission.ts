@@ -19,6 +19,8 @@ export const menuPermissionMap: Record<string, string[]> = {
   '/spare': ['ledger:view'],
   '/instrument': ['ledger:view'],
   '/tool': ['ledger:view'],
+  '/quota': ['quota:view', 'ledger:view'],
+  '/alerts': ['alert:view', 'ledger:view'],
   '/personnel': ['ledger:view', 'system:user'],
   '/manufacturer': ['ledger:view'],
   '/device-type': ['ledger:view'],

@@ -36,32 +36,37 @@ interface MenuRoute {
 
 const menus = menuRoutes as MenuRoute[]
 
-const visibleMenus = computed(() =>
-  menus
-    .filter((item) => canAccessMenuPath(item.path, userStore.context))
-    .map((item) => {
-      if (!item.children?.length) return item
-      const children = item.children.filter((child) => {
-        if (item.path === '/system') {
-          return canAccessSystemChild(child.path, userStore.context)
-        }
-        return true
-      })
-      if (!children.length) return null
-      return { ...item, children }
-    })
-    .filter((item): item is MenuRoute => item !== null),
-)
-
 function resolvePath(base: string, childPath: string) {
   if (childPath.startsWith('/')) return childPath
-  return `${base}/${childPath}`.replace(/\/+/g, '/')
+  const b = base.replace(/\/$/, '')
+  return `${b}/${childPath}`.replace(/\/+/g, '/')
 }
+
+function filterMenuTree(items: MenuRoute[], parentPath = ''): MenuRoute[] {
+  return items
+    .map((item) => {
+      const fullPath = item.path.startsWith('/') ? item.path : resolvePath(parentPath, item.path)
+      if (!canAccessMenuPath(fullPath, userStore.context)) return null
+
+      if (!item.children?.length) return { ...item, path: fullPath }
+
+      let children = item.children
+      if (fullPath === '/system') {
+        children = item.children.filter((child) => canAccessSystemChild(child.path, userStore.context))
+      }
+      const nested = filterMenuTree(children, fullPath)
+      if (!nested.length && item.children.length) return null
+      return { ...item, path: fullPath, children: nested }
+    })
+    .filter((x): x is MenuRoute => x !== null)
+}
+
+const visibleMenus = computed(() => filterMenuTree(menus))
 </script>
 
 <template>
   <el-container class="layout">
-    <el-aside :width="appStore.sidebarCollapsed ? '64px' : '220px'" class="sidebar">
+    <el-aside :width="appStore.sidebarCollapsed ? '64px' : '240px'" class="sidebar">
       <div class="logo">
         <el-icon :size="24"><Box /></el-icon>
         <span v-show="!appStore.sidebarCollapsed">智慧化生产专业仓</span>
@@ -82,13 +87,21 @@ function resolvePath(base: string, childPath: string) {
                 <el-icon v-if="item.meta?.icon"><component :is="item.meta.icon" /></el-icon>
                 <span>{{ item.meta?.title }}</span>
               </template>
-              <el-menu-item
-                v-for="child in item.children"
-                :key="resolvePath(item.path, child.path)"
-                :index="resolvePath(item.path, child.path)"
-              >
-                {{ child.meta?.title }}
-              </el-menu-item>
+              <template v-for="child in item.children" :key="child.path">
+                <el-sub-menu v-if="child.children?.length" :index="child.path">
+                  <template #title>{{ child.meta?.title }}</template>
+                  <el-menu-item
+                    v-for="grand in child.children"
+                    :key="grand.path"
+                    :index="grand.path"
+                  >
+                    {{ grand.meta?.title }}
+                  </el-menu-item>
+                </el-sub-menu>
+                <el-menu-item v-else :index="child.path">
+                  {{ child.meta?.title }}
+                </el-menu-item>
+              </template>
             </el-sub-menu>
             <el-menu-item v-else :index="item.path">
               <el-icon v-if="item.meta?.icon"><component :is="item.meta.icon" /></el-icon>
@@ -130,7 +143,7 @@ function resolvePath(base: string, childPath: string) {
         <router-view />
       </el-main>
       <el-footer class="footer" height="auto">
-        Copyright © 2026-present 智慧化生产专业仓管理系统
+        Copyright © 2026-present 智慧化生产专业仓管理系统 · 专业仓数字化管控
       </el-footer>
     </el-container>
   </el-container>

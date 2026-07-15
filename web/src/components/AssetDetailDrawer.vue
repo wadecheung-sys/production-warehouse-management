@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { AssetLifecycleEvent } from '@/types'
 import { useDataStore } from '@/stores/data'
@@ -8,9 +8,23 @@ const props = defineProps<{
   assetCode: string | null
 }>()
 
+const emit = defineEmits<{ close: [] }>()
+
 const visible = defineModel<boolean>('visible', { default: false })
 const dataStore = useDataStore()
 const router = useRouter()
+
+watch(
+  () => props.assetCode,
+  (code) => {
+    visible.value = Boolean(code)
+  },
+  { immediate: true },
+)
+
+watch(visible, (v) => {
+  if (!v) emit('close')
+})
 
 const ledger = computed(() =>
   props.assetCode ? dataStore.getLedgerByCode(props.assetCode) : null,
@@ -52,20 +66,48 @@ function eventIcon(type: AssetLifecycleEvent['type']) {
   >
     <template v-if="ledger">
       <el-descriptions :column="2" border size="small" class="summary">
-        <el-descriptions-item label="资产编码">{{ ledger.assetCode }}</el-descriptions-item>
+        <el-descriptions-item label="装备编码">{{ ledger.assetCode }}</el-descriptions-item>
+        <el-descriptions-item label="实物ID">{{ ledger.physicalId || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="资产编号">{{ ledger.assetNo || '—' }}</el-descriptions-item>
         <el-descriptions-item label="设备类型">{{ ledger.typeName }}</el-descriptions-item>
+        <el-descriptions-item label="专业分类">{{ ledger.specialty || '—' }}</el-descriptions-item>
         <el-descriptions-item label="所属组织">{{ ledger.orgName }}</el-descriptions-item>
-        <el-descriptions-item label="生产仓地点">
+        <el-descriptions-item label="生产仓地点" :span="2">
           <el-button link type="primary" @click="goWarehouseLedger">{{ ledger.warehouseName }}</el-button>
         </el-descriptions-item>
+        <el-descriptions-item label="库区/货架/仓位">
+          {{ [ledger.storageArea, ledger.shelfNo, ledger.binNo].filter(Boolean).join(' / ') || '—' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="保管人">{{ ledger.keeperName || '—' }}</el-descriptions-item>
         <el-descriptions-item label="库存">{{ ledger.quantity }} {{ ledger.unit }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
+        <el-descriptions-item label="台账状态">
           <el-tag size="small">{{ ledger.status }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="生产厂家">{{ ledger.manufacturer || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="规格型号">{{ ledger.model || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="处置状态">{{ ledger.disposeStatus || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="设备状态">{{ ledger.deviceStatus || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="生产厂家">{{ ledger.manufacturer || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="规格型号">{{ ledger.model || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="电压等级">{{ ledger.voltageLevel || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="资产性质">{{ ledger.assetNature || '—' }}</el-descriptions-item>
         <el-descriptions-item label="购入日期">{{ ledger.purchaseDate }}</el-descriptions-item>
         <el-descriptions-item label="保修截止">{{ ledger.warrantyDate }}</el-descriptions-item>
+        <el-descriptions-item v-if="ledger.category === 'instrument'" label="最近校验">
+          {{ ledger.lastCheckDate || '—' }}
+        </el-descriptions-item>
+        <el-descriptions-item v-if="ledger.category === 'instrument'" label="校验状态">
+          <el-tag
+            size="small"
+            :type="ledger.checkDueStatus === '超期' ? 'danger' : ledger.checkDueStatus === '临期' ? 'warning' : 'success'"
+          >
+            {{ ledger.checkDueStatus || '—' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item v-if="ledger.category === 'spare'" label="备品来源">
+          {{ ledger.spareSource || '—' }}
+        </el-descriptions-item>
+        <el-descriptions-item v-if="ledger.warehouseAgeDays != null" label="库龄(天)">
+          {{ ledger.warehouseAgeDays }}
+        </el-descriptions-item>
       </el-descriptions>
 
       <div class="stat-row">

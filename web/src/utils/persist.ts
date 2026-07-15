@@ -18,7 +18,7 @@ export function removeKey(key: string) {
   localStorage.removeItem(PREFIX + key)
 }
 
-/** 清除全部业务数据，恢复初始 Mock（保留登录态） */
+/** 清除本地业务缓存（保留登录态） */
 export function clearBusinessData() {
   localStorage.removeItem(PREFIX + 'business')
 }

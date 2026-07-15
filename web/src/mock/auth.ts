@@ -1,14 +1,14 @@
 import type { DataScope } from '@/types'
 
-/** 演示登录账号（密码统一 123456） */
-export interface DemoAccount {
+/** 系统登录账号 */
+export interface SystemAccount {
   username: string
   password: string
   personId: string
   dataScope: DataScope
 }
 
-export const demoAccounts: DemoAccount[] = [
+export const systemAccounts: SystemAccount[] = [
   { username: 'admin', password: '123456', personId: 'p-1', dataScope: 'all' },
   { username: 'ln_province', password: '123456', personId: 'p-2', dataScope: 'org_and_children' },
   { username: 'sy_city', password: '123456', personId: 'p-3', dataScope: 'org_and_children' },

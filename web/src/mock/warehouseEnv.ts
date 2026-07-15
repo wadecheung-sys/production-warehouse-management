@@ -1,4 +1,4 @@
-/** 智慧仓环境监测（Mock，对齐行业 PDF 温湿度/烟感占位） */
+/** 智慧仓环境监测数据 */
 export interface SmartWarehouseEnv {
   temperature: number
   humidity: number

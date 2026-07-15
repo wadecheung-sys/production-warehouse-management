@@ -17,6 +17,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000002',
     warehouseType: '备品仓',
     isSmart: true,
+    lng: 123.4,
+    lat: 41.78,
     createdAt: '2024-06-01 09:00:00',
   },
   {
@@ -34,6 +36,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000002',
     warehouseType: '仪器室',
     isSmart: false,
+    lng: 123.41,
+    lat: 41.79,
     createdAt: '2024-07-15 10:00:00',
   },
   {
@@ -51,6 +55,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000003',
     warehouseType: '综合仓',
     isSmart: true,
+    lng: 123.46,
+    lat: 41.8,
     createdAt: '2024-05-20 08:30:00',
   },
   {
@@ -68,6 +74,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000004',
     warehouseType: '工器具室',
     isSmart: false,
+    lng: 123.47,
+    lat: 41.81,
     createdAt: '2024-08-01 14:00:00',
   },
   {
@@ -85,6 +93,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000012',
     warehouseType: '备品仓',
     isSmart: false,
+    lng: 123.45,
+    lat: 41.72,
     remark: '地市汇总周转仓',
     createdAt: '2023-11-10 09:00:00',
   },
@@ -103,6 +113,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000011',
     warehouseType: '备品仓',
     isSmart: false,
+    lng: 121.62,
+    lat: 38.92,
     createdAt: '2024-03-01 10:00:00',
   },
   {
@@ -120,6 +132,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000011',
     warehouseType: '仪器室',
     isSmart: false,
+    lng: 121.58,
+    lat: 38.91,
     createdAt: '2024-04-18 11:00:00',
   },
   {
@@ -137,6 +151,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000012',
     warehouseType: '综合仓',
     isSmart: true,
+    lng: 122.07,
+    lat: 41.12,
     remark: '智慧化改造试点仓室',
     createdAt: '2024-09-01 08:00:00',
   },
@@ -155,6 +171,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000012',
     warehouseType: '备品仓',
     isSmart: false,
+    lng: 122.05,
+    lat: 41.13,
     createdAt: '2024-10-12 09:30:00',
   },
   {
@@ -172,6 +190,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000005',
     warehouseType: '工器具室',
     isSmart: false,
+    lng: 123.39,
+    lat: 41.77,
     createdAt: '2025-01-05 10:00:00',
   },
   {
@@ -189,6 +209,8 @@ export const warehouseSites: WarehouseSite[] = [
     contactPhone: '13800000002',
     warehouseType: '综合仓',
     isSmart: false,
+    lng: 123.42,
+    lat: 41.76,
     remark: '规划中的新建仓室',
     createdAt: '2025-03-01 08:00:00',
   },

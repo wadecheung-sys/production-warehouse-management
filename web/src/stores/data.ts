@@ -2,19 +2,27 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import * as seed from '@/mock/data'
 import type {
+  AlertItem,
   AssetCategory,
   AssetLedger,
   AssetLifecycleEvent,
   DeviceType,
   FaultRecord,
   InOutRecord,
+  InventoryCheckMethod,
   InventoryLineItem,
+  InventoryPlanLevel,
   InventoryTask,
   MaintenanceRecord,
   Manufacturer,
+  OrgDeviceParam,
   Organization,
+  OrgType,
   Person,
+  QuotaResult,
+  QuotaRule,
   Role,
+  StockBill,
   WarehouseSite,
 } from '@/types'
 import { genAssetCode, genId, nowStr } from '@/utils/id'
@@ -27,9 +35,10 @@ import {
   validateOrgHierarchy,
 } from '@/utils/org'
 import { clearBusinessData, loadJson, saveJson } from '@/utils/persist'
+import { calcQuotaLimits, calcStandardQty } from '@/utils/quota'
 
-/** 业务数据结构版本；组织/仓室/台账模型升级时递增，旧数据将重置为种子 */
-export const BUSINESS_SCHEMA_VERSION = 3
+/** 业务数据结构版本；v3 出入库审批/定额/告警 */
+export const BUSINESS_SCHEMA_VERSION = 4
 
 interface BusinessData {
   schemaVersion: number
@@ -40,11 +49,16 @@ interface BusinessData {
   manufacturers: Manufacturer[]
   deviceTypes: DeviceType[]
   ledgers: AssetLedger[]
+  stockBills: StockBill[]
   inOutRecords: InOutRecord[]
   faultRecords: FaultRecord[]
   maintenanceRecords: MaintenanceRecord[]
   inventoryTasks: InventoryTask[]
   inventoryLineItems: InventoryLineItem[]
+  quotaRules: QuotaRule[]
+  orgDeviceParams: OrgDeviceParam[]
+  quotaResults: QuotaResult[]
+  alerts: AlertItem[]
 }
 
 function getSeed(): BusinessData {
@@ -57,11 +71,16 @@ function getSeed(): BusinessData {
     manufacturers: [...seed.manufacturers],
     deviceTypes: [...seed.deviceTypes],
     ledgers: [...seed.ledgers],
+    stockBills: [...seed.stockBills],
     inOutRecords: [...seed.inOutRecords],
     faultRecords: [...seed.faultRecords],
     maintenanceRecords: [...seed.maintenanceRecords],
     inventoryTasks: [...seed.inventoryTasks],
     inventoryLineItems: [...seed.inventoryLineItems],
+    quotaRules: [...seed.quotaRules],
+    orgDeviceParams: [...seed.orgDeviceParams],
+    quotaResults: [...seed.quotaResults],
+    alerts: [...seed.alerts],
   }
 }
 
@@ -87,11 +106,16 @@ export const useDataStore = defineStore('data', () => {
   const manufacturers = computed(() => data.value.manufacturers)
   const deviceTypes = computed(() => data.value.deviceTypes)
   const ledgers = computed(() => data.value.ledgers)
+  const stockBills = computed(() => data.value.stockBills)
   const inOutRecords = computed(() => data.value.inOutRecords)
   const faultRecords = computed(() => data.value.faultRecords)
   const maintenanceRecords = computed(() => data.value.maintenanceRecords)
   const inventoryTasks = computed(() => data.value.inventoryTasks)
   const inventoryLineItems = computed(() => data.value.inventoryLineItems)
+  const quotaRules = computed(() => data.value.quotaRules)
+  const orgDeviceParams = computed(() => data.value.orgDeviceParams)
+  const quotaResults = computed(() => data.value.quotaResults)
+  const alerts = computed(() => data.value.alerts)
 
   function getOrg(id: string) {
     return data.value.organizations.find((o) => o.id === id)
@@ -414,7 +438,144 @@ export const useDataStore = defineStore('data', () => {
     data.value.ledgers = data.value.ledgers.filter((l) => l.id !== id)
   }
 
-  // --- InOut（联动台账数量）---
+  // --- StockBill 审批出入库（确认后才改库存）---
+  function genBillNo(billType: '入库' | '出库') {
+    const prefix = billType === '入库' ? 'RK' : 'CK'
+    const d = new Date()
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+    const seq = String(data.value.stockBills.length + 1).padStart(3, '0')
+    return `${prefix}${ymd}${seq}`
+  }
+
+  function createStockBill(
+    item: Omit<StockBill, 'id' | 'billNo' | 'assetName' | 'createTime' | 'status'> & {
+      status?: StockBill['status']
+      orgName?: string
+    },
+  ) {
+    const ledger = getLedgerByCode(item.assetCode)
+    if (!ledger) throw new Error('资产编码不存在')
+    if (item.billType === '出库' && item.scene === '送检' && ledger.checkDueStatus === '超期') {
+      pushAlert({
+        category: '校验',
+        level: '严重',
+        title: `${ledger.name}校验超期禁止出库`,
+        content: `${ledger.assetCode} 校验已超期，出库申请已拦截。`,
+        targetType: 'ledger',
+        targetId: ledger.id,
+        routePath: `/${ledger.category}/ledger`,
+        orgName: ledger.orgName,
+      })
+      throw new Error('该仪器仪表校验已超期，禁止出库（请先完成校验）')
+    }
+    if (item.billType === '出库' && ledger.checkDueStatus === '超期' && ledger.category === 'instrument') {
+      pushAlert({
+        category: '校验',
+        level: '严重',
+        title: `${ledger.name}校验超期禁止出库`,
+        content: `${ledger.assetCode} 校验已超期，出库申请已拦截。`,
+        targetType: 'ledger',
+        targetId: ledger.id,
+        routePath: `/${ledger.category}/ledger`,
+        orgName: ledger.orgName,
+      })
+      throw new Error('该仪器仪表校验已超期，禁止出库')
+    }
+    const bill: StockBill = {
+      ...item,
+      id: genId('sb'),
+      billNo: genBillNo(item.billType),
+      assetName: ledger.name,
+      orgName: item.orgName || ledger.orgName,
+      warehouseId: item.warehouseId || ledger.warehouseId,
+      warehouseName: item.warehouseName || ledger.warehouseName,
+      status: item.status ?? '待审批',
+      createTime: nowStr(),
+    }
+    data.value.stockBills.unshift(bill)
+    return bill.id
+  }
+
+  function submitStockBill(id: string) {
+    const bill = data.value.stockBills.find((b) => b.id === id)
+    if (!bill) return
+    if (bill.status !== '草稿') throw new Error('仅草稿可提交审批')
+    bill.status = '待审批'
+  }
+
+  function approveStockBill(id: string, approver: string, remark?: string) {
+    const bill = data.value.stockBills.find((b) => b.id === id)
+    if (!bill) return
+    if (bill.status !== '待审批') throw new Error('当前状态不可审批')
+    bill.status = '待确认'
+    bill.approver = approver
+    bill.approveTime = nowStr()
+    bill.approveRemark = remark
+  }
+
+  function rejectStockBill(id: string, approver: string, reason: string) {
+    const bill = data.value.stockBills.find((b) => b.id === id)
+    if (!bill) return
+    if (bill.status !== '待审批') throw new Error('当前状态不可驳回')
+    bill.status = '已驳回'
+    bill.approver = approver
+    bill.approveTime = nowStr()
+    bill.rejectReason = reason
+  }
+
+  function confirmStockBill(id: string, confirmer: string, physicalId: string) {
+    const bill = data.value.stockBills.find((b) => b.id === id)
+    if (!bill) return
+    if (bill.status !== '待确认' && bill.status !== '已通过') {
+      throw new Error('当前状态不可确认')
+    }
+    const ledger = getLedgerByCode(bill.assetCode)
+    if (!ledger) throw new Error('资产不存在')
+    if (bill.billType === '出库' && ledger.category === 'instrument' && ledger.checkDueStatus === '超期') {
+      throw new Error('仪器校验超期，禁止确认出库')
+    }
+    if (!physicalId?.trim()) throw new Error('请扫码或录入实物 ID')
+    const expect = ledger.physicalId || ledger.assetCode
+    if (physicalId.trim() !== expect && physicalId.trim() !== ledger.assetCode) {
+      throw new Error(`实物 ID 不匹配，期望 ${expect}`)
+    }
+    if (bill.billType === '出库' && ledger.quantity < bill.quantity) {
+      throw new Error(`库存不足，当前库存 ${ledger.quantity} ${ledger.unit}`)
+    }
+    if (bill.billType === '入库') ledger.quantity += bill.quantity
+    else ledger.quantity -= bill.quantity
+
+    bill.status = '已确认'
+    bill.confirmer = confirmer
+    bill.confirmTime = nowStr()
+    bill.physicalId = physicalId.trim()
+
+    data.value.inOutRecords.unshift({
+      id: genId('io'),
+      category: bill.category,
+      assetCode: bill.assetCode,
+      assetName: bill.assetName,
+      type: bill.billType,
+      quantity: bill.quantity,
+      operator: confirmer,
+      orgName: bill.orgName,
+      reason: bill.reason,
+      operateTime: nowStr(),
+      billId: bill.id,
+      scene: bill.scene,
+      workOrderNo: bill.workOrderNo,
+      physicalId: bill.physicalId,
+    })
+  }
+
+  function removeStockBill(id: string) {
+    const bill = data.value.stockBills.find((b) => b.id === id)
+    if (!bill) return
+    if (bill.status === '已确认') throw new Error('已确认单据不可删除')
+    data.value.stockBills = data.value.stockBills.filter((b) => b.id !== id)
+  }
+
+  /** 兼容历史出入库流水 */
   function addInOutRecord(item: Omit<InOutRecord, 'id' | 'assetName' | 'orgName' | 'operateTime'>) {
     const ledger = getLedgerByCode(item.assetCode)
     if (!ledger) throw new Error('资产编码不存在')
@@ -436,12 +597,32 @@ export const useDataStore = defineStore('data', () => {
   function removeInOutRecord(id: string) {
     const record = data.value.inOutRecords.find((r) => r.id === id)
     if (!record) return
+    if (record.billId) throw new Error('由审批单生成的流水不可直接删除')
     const ledger = getLedgerByCode(record.assetCode)
     if (ledger) {
       if (record.type === '入库') ledger.quantity -= record.quantity
       else ledger.quantity += record.quantity
     }
     data.value.inOutRecords = data.value.inOutRecords.filter((r) => r.id !== id)
+  }
+
+  function pushAlert(
+    item: Omit<AlertItem, 'id' | 'createTime' | 'status'> & { status?: AlertItem['status'] },
+  ) {
+    data.value.alerts.unshift({
+      ...item,
+      id: genId('al'),
+      status: item.status ?? '未处理',
+      createTime: nowStr(),
+    })
+  }
+
+  function handleAlert(id: string, status: '已处理' | '已忽略', remark?: string) {
+    const al = data.value.alerts.find((a) => a.id === id)
+    if (!al) return
+    al.status = status
+    al.handleTime = nowStr()
+    al.handleRemark = remark
   }
 
   // --- Fault ---
@@ -633,6 +814,15 @@ export const useDataStore = defineStore('data', () => {
     })
   }
 
+  function levelForOrgType(type: OrgType): InventoryPlanLevel {
+    if (type === 'province') return 'province'
+    if (type === 'city') return 'city'
+    if (type === 'county') return 'county'
+    if (type === 'team') return 'team'
+    return 'center'
+  }
+
+  /** 省市县（班组）逐级下达盘点计划 */
   function dispatchInventoryTask(params: {
     category: AssetCategory
     taskName: string
@@ -645,16 +835,80 @@ export const useDataStore = defineStore('data', () => {
       throw new Error('请选择省公司或地市公司作为盘点汇总组织')
     }
 
-    const childOrgs = data.value.organizations.filter((o) => o.parentId === params.centerOrgId)
-    if (!childOrgs.length) throw new Error('该组织下无下级单位可下发盘点')
-
     const rootId = genId('inv')
-    let totalAll = 0
+    const created: InventoryTask[] = []
 
-    const childTasks: InventoryTask[] = childOrgs.map((org) => {
-      const orgLedgers = data.value.ledgers.filter(
-        (l) => l.category === params.category && l.orgId === org.id,
+    function leafOrgsUnder(orgId: string): Organization[] {
+      const descendants = getOrgDescendantIds(data.value.organizations, orgId, false)
+      return data.value.organizations.filter(
+        (o) => descendants.includes(o.id) && (o.type === 'team' || o.type === 'county'),
       )
+    }
+
+    const rootTask: InventoryTask = {
+      id: rootId,
+      category: params.category,
+      taskName: params.taskName,
+      orgId: center.id,
+      orgName: center.name,
+      assignee: params.assignee,
+      totalCount: 0,
+      checkedCount: 0,
+      status: '待盘点',
+      deadline: params.deadline,
+      createTime: nowStr(),
+      parentId: null,
+      level: levelForOrgType(center.type),
+    }
+    created.push(rootTask)
+
+    // 地市级中间节点（若从省下发）
+    const midOrgs =
+      center.type === 'province'
+        ? data.value.organizations.filter((o) => o.parentId === center.id && o.type === 'city')
+        : []
+
+    const midMap = new Map<string, string>()
+    for (const mid of midOrgs) {
+      const midId = genId('inv')
+      midMap.set(mid.id, midId)
+      created.push({
+        id: midId,
+        category: params.category,
+        taskName: `${params.taskName} — ${mid.name}`,
+        orgId: mid.id,
+        orgName: mid.name,
+        assignee: params.assignee,
+        totalCount: 0,
+        checkedCount: 0,
+        status: '待盘点',
+        deadline: params.deadline,
+        createTime: nowStr(),
+        parentId: rootId,
+        level: 'city',
+      })
+    }
+
+    const execOrgs =
+      center.type === 'city'
+        ? leafOrgsUnder(center.id)
+        : midOrgs.flatMap((m) => leafOrgsUnder(m.id).map((o) => ({ ...o, midId: m.id })))
+
+    let totalAll = 0
+    const execList =
+      center.type === 'city'
+        ? execOrgs.map((o) => ({ org: o as Organization, parentTaskId: rootId }))
+        : (execOrgs as Array<Organization & { midId: string }>).map((o) => ({
+            org: o,
+            parentTaskId: midMap.get(o.midId) || rootId,
+          }))
+
+    for (const { org, parentTaskId } of execList) {
+      const orgIds = getOrgDescendantIds(data.value.organizations, org.id, true)
+      const orgLedgers = data.value.ledgers.filter(
+        (l) => l.category === params.category && orgIds.includes(l.orgId),
+      )
+      if (!orgLedgers.length) continue
       const totalCount = orgLedgers.reduce((s, l) => s + l.quantity, 0)
       totalAll += totalCount
       const taskId = genId('inv')
@@ -669,9 +923,10 @@ export const useDataStore = defineStore('data', () => {
           bookQuantity: l.quantity,
           actualQuantity: null,
           status: '待盘',
+          physicalId: l.physicalId,
         })
       })
-      return {
+      created.push({
         id: taskId,
         category: params.category,
         taskName: `${params.taskName} — ${org.name}`,
@@ -680,43 +935,39 @@ export const useDataStore = defineStore('data', () => {
         assignee: params.assignee,
         totalCount,
         checkedCount: 0,
-        status: '待盘点' as const,
+        status: '待盘点',
         deadline: params.deadline,
         createTime: nowStr(),
-        parentId: rootId,
-        level: 'warehouse' as const,
-      }
-    })
-
-    const rootTask: InventoryTask = {
-      id: rootId,
-      category: params.category,
-      taskName: params.taskName,
-      orgId: center.id,
-      orgName: center.name,
-      assignee: params.assignee,
-      totalCount: totalAll,
-      checkedCount: 0,
-      status: '待盘点',
-      deadline: params.deadline,
-      createTime: nowStr(),
-      parentId: null,
-      level: 'center',
+        parentId: parentTaskId,
+        level: levelForOrgType(org.type),
+      })
     }
 
-    data.value.inventoryTasks.unshift(rootTask, ...childTasks)
+    if (created.length <= 1) throw new Error('该组织下无可盘点的下级单位/台账')
+
+    rootTask.totalCount = totalAll
+    // 回填市级合计
+    for (const mid of created.filter((t) => t.level === 'city' && t.parentId === rootId)) {
+      const children = created.filter((t) => t.parentId === mid.id)
+      mid.totalCount = children.reduce((s, c) => s + c.totalCount, 0)
+    }
+
+    data.value.inventoryTasks.unshift(...created)
     return rootId
   }
 
   function updateInventoryLine(
     id: string,
     actualQuantity: number,
+    extra?: { checkMethod?: InventoryCheckMethod; scanCode?: string; photoDataUrl?: string },
   ) {
     const line = data.value.inventoryLineItems.find((l) => l.id === id)
     if (!line) return
     line.actualQuantity = actualQuantity
-    line.status =
-      actualQuantity === line.bookQuantity ? '已盘' : '有差异'
+    line.status = actualQuantity === line.bookQuantity ? '已盘' : '有差异'
+    if (extra?.checkMethod) line.checkMethod = extra.checkMethod
+    if (extra?.scanCode) line.scanCode = extra.scanCode
+    if (extra?.photoDataUrl) line.photoDataUrl = extra.photoDataUrl
 
     const task = data.value.inventoryTasks.find((t) => t.id === line.taskId)
     if (!task) return
@@ -737,20 +988,128 @@ export const useDataStore = defineStore('data', () => {
     parent.totalCount = children.reduce((s, c) => s + c.totalCount, 0)
     parent.checkedCount = children.reduce((s, c) => s + c.checkedCount, 0)
     if (parent.checkedCount === 0) parent.status = '待盘点'
-    else if (parent.checkedCount < parent.totalCount) parent.status = '盘点中'
-    else parent.status = '已完成'
+    else if (children.every((c) => c.status === '已完成')) parent.status = '已完成'
+    else if (parent.checkedCount > 0) parent.status = '盘点中'
+    if (parent.parentId) recalcParentInventory(parent.parentId)
   }
 
   function removeInventoryTask(id: string) {
-    const childIds = data.value.inventoryTasks.filter((t) => t.parentId === id).map((t) => t.id)
-    const allIds = [id, ...childIds]
+    const collect = (pid: string): string[] => {
+      const kids = data.value.inventoryTasks.filter((t) => t.parentId === pid).map((t) => t.id)
+      return [pid, ...kids.flatMap(collect)]
+    }
+    const allIds = collect(id)
     data.value.inventoryTasks = data.value.inventoryTasks.filter((t) => !allIds.includes(t.id))
     data.value.inventoryLineItems = data.value.inventoryLineItems.filter(
       (l) => !allIds.includes(l.taskId),
     )
   }
 
-  // --- Dashboard stats ---
+  // --- Quota ---
+  function saveQuotaRule(item: Omit<QuotaRule, 'id'> & { id?: string }) {
+    if (item.id) {
+      const idx = data.value.quotaRules.findIndex((r) => r.id === item.id)
+      if (idx >= 0) data.value.quotaRules[idx] = { ...data.value.quotaRules[idx], ...item, id: item.id }
+      return item.id
+    }
+    const id = genId('qr')
+    data.value.quotaRules.unshift({ ...item, id })
+    return id
+  }
+
+  function removeQuotaRule(id: string) {
+    data.value.quotaRules = data.value.quotaRules.filter((r) => r.id !== id)
+  }
+
+  function saveOrgDeviceParam(item: Omit<OrgDeviceParam, 'id' | 'updatedAt' | 'orgName' | 'warehouseName'> & { id?: string }) {
+    const org = getOrg(item.orgId)
+    const wh = item.warehouseId ? getWarehouseSite(item.warehouseId) : undefined
+    const payload: OrgDeviceParam = {
+      id: item.id || genId('odp'),
+      orgId: item.orgId,
+      orgName: org?.name ?? '',
+      warehouseId: item.warehouseId,
+      warehouseName: wh?.name,
+      ruleId: item.ruleId,
+      deviceCount: item.deviceCount,
+      updatedAt: nowStr(),
+    }
+    if (item.id) {
+      const idx = data.value.orgDeviceParams.findIndex((p) => p.id === item.id)
+      if (idx >= 0) data.value.orgDeviceParams[idx] = payload
+    } else {
+      data.value.orgDeviceParams.unshift(payload)
+    }
+    return payload.id
+  }
+
+  function calculateAllQuotas() {
+    const results: QuotaResult[] = []
+    for (const param of data.value.orgDeviceParams) {
+      const rule = data.value.quotaRules.find((r) => r.id === param.ruleId)
+      if (!rule) continue
+      const standardQty = calcStandardQty(rule.formulaType, param.deviceCount, rule)
+      const { upperLimit, lowerLimit } = calcQuotaLimits(standardQty)
+      const actualQty = data.value.ledgers
+        .filter(
+          (l) =>
+            l.category === rule.category &&
+            l.typeName === rule.typeName &&
+            (param.warehouseId ? l.warehouseId === param.warehouseId : l.orgId === param.orgId),
+        )
+        .reduce((s, l) => s + l.quantity, 0)
+      const shortage = Math.max(0, lowerLimit - actualQty)
+      const overage = Math.max(0, actualQty - upperLimit)
+      const res: QuotaResult = {
+        id: genId('qres'),
+        ruleId: rule.id,
+        ruleName: rule.name,
+        orgId: param.orgId,
+        orgName: param.orgName,
+        warehouseId: param.warehouseId,
+        warehouseName: param.warehouseName,
+        category: rule.category,
+        typeName: rule.typeName,
+        formulaType: rule.formulaType,
+        deviceCount: param.deviceCount,
+        standardQty,
+        upperLimit,
+        lowerLimit,
+        actualQty,
+        shortage,
+        overage,
+        calculatedAt: nowStr(),
+      }
+      results.push(res)
+      if (shortage > 0) {
+        pushAlert({
+          category: '定额',
+          level: '警告',
+          title: `${rule.typeName}储备低于定额下限`,
+          content: `${param.orgName}${param.warehouseName ? '「' + param.warehouseName + '」' : ''}「${rule.typeName}」实库存 ${actualQty}，低于下限 ${lowerLimit}，缺额 ${shortage}，建议补仓。`,
+          targetType: 'quota',
+          targetId: res.id,
+          routePath: '/quota/results',
+          orgName: param.orgName,
+        })
+      }
+      if (overage > 0) {
+        pushAlert({
+          category: '定额',
+          level: '提示',
+          title: `${rule.typeName}储备高于定额上限`,
+          content: `${param.orgName}「${rule.typeName}」实库存 ${actualQty}，高于上限 ${upperLimit}，超额 ${overage}，建议消纳调拨。`,
+          targetType: 'quota',
+          targetId: res.id,
+          routePath: '/quota/results',
+          orgName: param.orgName,
+        })
+      }
+    }
+    data.value.quotaResults = results
+    return results
+  }
+
   const dashboardStats = computed(() => ({
     warehouseCount: data.value.warehouseSites.length,
     spareCount: data.value.ledgers.filter((l) => l.category === 'spare').reduce((s, l) => s + l.quantity, 0),
@@ -759,13 +1118,15 @@ export const useDataStore = defineStore('data', () => {
     pendingFaults: data.value.faultRecords.filter((f) => f.status === '待处理').length,
     ongoingMaintenance: data.value.maintenanceRecords.filter((m) => m.status === '进行中').length,
     inventoryProgress: (() => {
-      const roots = data.value.inventoryTasks.filter((t) => t.level === 'center')
+      const roots = data.value.inventoryTasks.filter((t) => !t.parentId)
       if (!roots.length) return 0
       const total = roots.reduce((s, t) => s + t.totalCount, 0)
       const checked = roots.reduce((s, t) => s + t.checkedCount, 0)
       return total ? Math.round((checked / total) * 100) : 0
     })(),
     orgCount: data.value.organizations.length,
+    openAlerts: data.value.alerts.filter((a) => a.status === '未处理').length,
+    shortageCount: data.value.quotaResults.filter((q) => q.shortage > 0).length,
   }))
 
   function resetAllData() {
@@ -782,11 +1143,16 @@ export const useDataStore = defineStore('data', () => {
     manufacturers,
     deviceTypes,
     ledgers,
+    stockBills,
     inOutRecords,
     faultRecords,
     maintenanceRecords,
     inventoryTasks,
     inventoryLineItems,
+    quotaRules,
+    orgDeviceParams,
+    quotaResults,
+    alerts,
     dashboardStats,
     getOrg,
     getOrgTree,
@@ -822,8 +1188,16 @@ export const useDataStore = defineStore('data', () => {
     addLedger,
     updateLedger,
     removeLedger,
+    createStockBill,
+    submitStockBill,
+    approveStockBill,
+    rejectStockBill,
+    confirmStockBill,
+    removeStockBill,
     addInOutRecord,
     removeInOutRecord,
+    pushAlert,
+    handleAlert,
     addFaultRecord,
     updateFaultRecord,
     removeFaultRecord,
@@ -836,6 +1210,10 @@ export const useDataStore = defineStore('data', () => {
     dispatchInventoryTask,
     updateInventoryLine,
     removeInventoryTask,
+    saveQuotaRule,
+    removeQuotaRule,
+    saveOrgDeviceParam,
+    calculateAllQuotas,
     resetAllData,
   }
 })

@@ -1,6 +1,6 @@
 /**
  * HTTP 模式数据提供者（对接后端时使用）。
- * Mock 模式下不会调用，仅作为 REST 契约参考。
+ * 本地数据层模式下不会调用，作为 REST 契约参考。
  */
 import { API } from '@/api/endpoints'
 import { httpDelete, httpGet, httpPost, httpPut } from '@/api/http'

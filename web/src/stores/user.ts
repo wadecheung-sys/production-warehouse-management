@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { demoAccounts } from '@/mock/auth'
+import { systemAccounts } from '@/mock/auth'
 import { organizations } from '@/mock/organizations'
 import { persons, roles } from '@/mock/data'
 import type { DataScope, OrgType, UserContext } from '@/types'
@@ -43,7 +43,7 @@ function saveContext(ctx: UserContext | null) {
 }
 
 function resolveLogin(username: string, password: string): UserContext | null {
-  const account = demoAccounts.find((a) => a.username === username && a.password === password)
+  const account = systemAccounts.find((a) => a.username === username && a.password === password)
   if (!account) return null
 
   const person = persons.find((p) => p.id === account.personId)

@@ -22,15 +22,21 @@ watch(
 
 const displayTask = computed(() => stack.value[stack.value.length - 1] ?? null)
 
+const isSummaryLevel = computed(() => {
+  const level = displayTask.value?.level
+  return level === 'center' || level === 'province' || level === 'city'
+})
+
 const childTasks = computed(() => {
   const task = displayTask.value
-  if (!task || task.level !== 'center') return []
+  if (!task || !isSummaryLevel.value) return []
   return dataStore.inventoryTasks.filter((t) => t.parentId === task.id)
 })
 
 const lineItems = computed(() => {
   const task = displayTask.value
-  if (!task || task.level !== 'warehouse') return []
+  if (!task) return []
+  if (isSummaryLevel.value) return []
   return dataStore.inventoryLineItems.filter((l) => l.taskId === task.id)
 })
 
@@ -71,7 +77,7 @@ function submitLineCount(row: InventoryLineItem, val: number | null) {
           <el-icon><ArrowLeft /></el-icon> 返回上级
         </el-button>
         <el-tag size="small">{{ displayTask.orgName }}</el-tag>
-        <el-tag size="small" type="info">{{ displayTask.level === 'center' ? '中心汇总' : '生产仓执行' }}</el-tag>
+        <el-tag size="small" type="info">{{ isSummaryLevel ? '汇总任务' : '执行任务' }}</el-tag>
       </div>
 
       <el-descriptions :column="2" border size="small" class="summary">
@@ -88,10 +94,10 @@ function submitLineCount(row: InventoryLineItem, val: number | null) {
         </el-descriptions-item>
       </el-descriptions>
 
-      <template v-if="displayTask.level === 'center'">
-        <h4 class="section-title">下级生产仓盘点任务（点击行下钻至资产明细）</h4>
+      <template v-if="isSummaryLevel">
+        <h4 class="section-title">下级盘点任务（点击行下钻）</h4>
         <el-table :data="childTasks" stripe border highlight-current-row @row-click="openChildTask">
-          <el-table-column prop="orgName" label="生产仓" width="130" />
+          <el-table-column prop="orgName" label="组织" width="130" />
           <el-table-column prop="assignee" label="负责人" width="90" />
           <el-table-column label="进度" min-width="140">
             <template #default="{ row }">

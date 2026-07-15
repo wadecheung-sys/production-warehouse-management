@@ -169,6 +169,10 @@ function goWarehouseLedger(site?: WarehouseSite | null) {
           </el-descriptions>
           <div class="card-footer">
             <el-button link type="primary" @click="goWarehouseLedger(currentSite)">编辑仓室信息 →</el-button>
+            <el-button link type="primary" @click="router.push('/spare/inout/in-apply')">入库申请 →</el-button>
+            <el-button link type="primary" @click="router.push('/spare/inout/out-apply')">出库申请 →</el-button>
+            <el-button link type="primary" @click="router.push('/spare/inventory/execute')">执行盘点 →</el-button>
+            <el-button link type="primary" @click="router.push('/spare/inventory/progress')">盘点进度 →</el-button>
           </div>
         </el-card>
 
@@ -294,7 +298,10 @@ function goWarehouseLedger(site?: WarehouseSite | null) {
 
 .card-footer {
   margin-top: 12px;
-  text-align: right;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 8px;
 }
 
 .env-card {

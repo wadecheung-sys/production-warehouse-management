@@ -469,7 +469,7 @@ function inventoryPercent(checked: number, total: number) {
 }
 
 function levelLabel(level: InventoryTask['level']) {
-  return level === 'center' ? '中心汇总' : '生产仓'
+  return level === 'center' || level === 'province' || level === 'city' ? '汇总' : '执行'
 }
 
 function filterByWarehouse(warehouseId: string) {
