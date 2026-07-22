@@ -6,13 +6,14 @@
 
 ## 在线演示
 
-- 演示地址：https://wadecheung-sys.github.io/pwms-demo/
-- 登录页：https://wadecheung-sys.github.io/pwms-demo/#/login
-- 代码仓库：https://github.com/wadecheung-sys/pwms-demo
+| 平台 | 演示 / 登录 | 代码仓库 |
+|------|-------------|----------|
+| **Gitee（国内推荐）** | https://zhangfa-wang.gitee.io/pwms-demo/ · [登录页](https://zhangfa-wang.gitee.io/pwms-demo/#/login) | https://gitee.com/zhangfa-wang/pwms-demo |
+| GitHub | https://wadecheung-sys.github.io/pwms-demo/ · [登录页](https://wadecheung-sys.github.io/pwms-demo/#/login) | https://github.com/wadecheung-sys/pwms-demo |
 
 默认账号：`admin` / `123456`
 
-> 若国内访问 GitHub Pages 不稳定，可改用后续国内托管链接；本地开发不受影响。
+> 国内访问优先用 Gitee；GitHub 与 Gitee 仓库内容平行同步，互不删除。
 
 ## 启动
 
