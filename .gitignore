@@ -13,6 +13,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Local credentials (never commit)
+.secrets/
+
 # Reference materials (local only, not for version control)
 reference/
 
